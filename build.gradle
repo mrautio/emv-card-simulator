@@ -1,0 +1,136 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    configurations.classpath {
+        resolutionStrategy.activateDependencyLocking()
+    }
+}
+
+plugins {
+    id 'java'
+    id 'checkstyle'
+    id 'groovy'
+}
+
+apply plugin: 'java'
+
+checkstyleMain {
+    source ='src/main/java'
+    maxWarnings = 0
+}
+
+checkstyleTest {
+    source ='src/test/java'
+    maxWarnings = 0
+}
+
+
+repositories {
+    mavenCentral()
+}
+
+configurations {
+    javacardAntTask
+}
+
+dependencies {
+    testImplementation (
+        'org.junit.jupiter:junit-jupiter-engine:latest.release',
+        'com.klinec:jcardsim:latest.release'
+    )
+    implementation (
+        'com.klinec:jcardsim:latest.release'
+    )
+    javacardAntTask 'com.github.martinpaljak:ant-javacard:latest.release'
+}
+
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+test {
+    useJUnitPlatform()
+
+    testLogging {
+        outputs.upToDateWhen { false }
+        events "started", "skipped", "failed"
+        exceptionFormat "full"
+        showStandardStreams true
+    }
+
+    failFast = false
+}
+
+sourceCompatibility = 1.7
+
+compileJava {
+    options.compilerArgs = [
+            '-Xlint:all',
+            '-Werror'
+    ]
+    // JavaCard 3.0.5 supports up to 1.7 class files
+    targetCompatibility = 1.7
+}
+
+compileTestJava {
+    options.compilerArgs = [
+            '-Xlint:all',
+            '-Werror'
+    ]
+    // JUnit 5 requires Java 8
+    targetCompatibility = 1.8
+}
+
+task downloadGp {
+    doLast {
+        String gpJar = 'gp.jar'
+        if (!new File(gpJar).exists()) {
+            String checksumExtension = '.sha512.tmp'
+            String gpJarTemp = gpJar + checksumExtension
+
+            ant.get(src: 'https://github.com/martinpaljak/GlobalPlatformPro/releases/download/v20.07.04/gp.jar', dest:gpJar)
+
+            ant.checksum(file: gpJar, algorithm:'SHA-512', fileext: checksumExtension)
+            String expectedChecksum = "4030c6eb46fb932c167f9a53fdbfab6b1364dbaafad5068b5bfc9779140cc1659e655d5ff53ee20d2823163011ede3ec9c3916632c2173cb6a1e17b84389490a"
+            String actualChecksum = new File(gpJarTemp).text.trim()
+            delete gpJarTemp
+
+            if (!expectedChecksum.equals(actualChecksum)) {
+                throw new GradleException("Checksum not valid! file: " + gpJar + ", expected: " + expectedChecksum + ", actual: " + actualChecksum)        
+            }
+        }
+    }
+}
+
+task cap {
+    dependsOn assemble
+    group "Build"
+    description "Assembles a cap archive containing the main classes."
+
+    doLast {
+        ant.taskdef(name: 'javacard', classname: 'pro.javacard.ant.JavaCard', classpath: configurations.javacardAntTask.asPath)
+
+        ant.javacard(jckit: 'oracle_javacard_sdks/jc305u3_kit') {
+            cap (
+                package: 'emvcardsimulator.pse',
+                version: '0.1',
+                output: 'build/emvcardsimulator.cap',
+                jca: 'build/emvcardsimulator.jca',
+                export: 'build',
+                classes: "build/classes/java/main",
+                aid: '010203040506') {
+                applet (class: 'emvcardsimulator.pse.PaymentSystemEnvironment', aid: '01020304050601')
+            }
+        }
+    }
+}
+
+task smartCardDeploy(type: Exec) {
+    dependsOn downloadGp, cap
+    group "JavaCard"
+    description "Deploy application to Global Platform JavaCard"
+
+    // TODO: implement the actual deployement
+    commandLine 'java', '-jar', 'gp.jar', '-h'
+}

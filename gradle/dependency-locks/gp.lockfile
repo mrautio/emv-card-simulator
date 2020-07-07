@@ -1,0 +1,11 @@
+# This is a Gradle generated file for dependency locking.
+# Manual edits can break the build and are not advised.
+# This file is expected to be part of source control.
+com.github.martinpaljak:apdu4j-core:19.05.08
+com.github.martinpaljak:capfile:19.03.04
+com.github.martinpaljak:globalplatformpro:19.06.16
+com.google.code.gson:gson:2.8.4
+com.payneteasy:ber-tlv:1.0-9
+org.bouncycastle:bcpkix-jdk15on:1.62
+org.bouncycastle:bcprov-jdk15on:1.62
+org.slf4j:slf4j-api:1.7.25
