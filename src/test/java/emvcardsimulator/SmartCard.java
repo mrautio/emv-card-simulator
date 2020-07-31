@@ -26,8 +26,6 @@ public class SmartCard {
 
     private static Card card;
 
-    private static HashMap<String, AID> installedApplets;
-
     /**
      * Send APDU command data.
      * @throws CardException
@@ -50,32 +48,14 @@ public class SmartCard {
      */
     public static void connect() throws CardException {
         cardSimulator = new CardSimulator();
-        installedApplets = new HashMap<>();
     }
 
     /**
      * Install an applet.
      * @throws CardException
      */
-    public static void install(String aid, Class<? extends Applet> applet) throws CardException {
-        AID appletAid = AIDUtil.create(aid);
-        cardSimulator.installApplet(appletAid, applet);
-        installedApplets.put(aid, appletAid);
-    }
-
-    /**
-     * Select an applet.
-     * @throws CardException
-     */
-    public static ResponseAPDU select(String aid) throws CardException {
-        if (!installedApplets.containsKey(aid)) {
-            throw new CardException("Applet has not been installed! aid:" + aid);
-        }
-
-        //cardSimulator.selectApplet(installedApplets.get(aid));
-        ResponseAPDU response = transmitCommand(AIDUtil.select(aid));
-
-        return response;
+    public static void install(byte[] aid, Class<? extends Applet> applet) throws CardException {
+        cardSimulator.installApplet(new AID(aid, (short) 0, (byte) aid.length), applet);
     }
 
     /**
@@ -89,7 +69,6 @@ public class SmartCard {
         }
 
         card = null;
-        installedApplets = null;
         cardSimulator = null;
     }
 }

@@ -1,4 +1,4 @@
-package emvcardsimulator.pse;
+package emvcardsimulator;
 
 import javacard.framework.APDU;
 import javacard.framework.ISOException;
@@ -6,9 +6,13 @@ import javacard.framework.ISOException;
 /**
  * Unit testing applet abstraction container to catch and print any possible exceptions. 
  */
-public class PaymentSystemEnvironmentContainer extends PaymentSystemEnvironment {
+public class PaymentApplicationContainer extends PaymentApplication {
     public static void install(byte[] buffer, short offset, byte length) {
-        (new PaymentSystemEnvironmentContainer()).register();
+        (new PaymentApplicationContainer(buffer, offset, length)).register();
+    }
+
+    public PaymentApplicationContainer(byte[] buffer, short offset, byte length) {
+        super(buffer, offset, length);
     }
 
     /**

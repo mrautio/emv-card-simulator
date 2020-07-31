@@ -15,6 +15,18 @@ plugins {
 
 apply plugin: 'java'
 
+task buildSimulatorLibrary(type: Exec) {
+    group "Build"
+    description "Build Rust simulator library"
+    workingDir 'src/test/rust/simulator'
+
+    commandLine 'cargo', 'build'
+}
+
+tasks.withType(Test) {
+    systemProperty "java.library.path", "../../rust/simulator/target/debug/"
+}
+
 checkstyleMain {
     source ='src/main/java'
     maxWarnings = 0
@@ -50,6 +62,9 @@ dependencyLocking {
 }
 
 test {
+    dependsOn buildSimulatorLibrary
+    workingDir 'src/test/java/emvcardsimulator'
+
     useJUnitPlatform()
 
     testLogging {
@@ -62,23 +77,30 @@ test {
     failFast = false
 }
 
-sourceCompatibility = 1.7
-
 compileJava {
     options.compilerArgs = [
             '-Xlint:all',
+            '-Xlint:-options', //java 13 warns about Java 7 targetting
+            '-Xlint:-deprecation', // Some Java Card features are deprecated in 3.0.5 but we target earlier versions
             '-Werror'
     ]
-    // JavaCard 3.0.5 supports up to 1.7 class files
+    // // JavaCard 3.0.5 supports Java 1.7 class files (class version 51)
+    // // JavaCard 3.0.3-3.0.4 supports Java 1.6 class files (class version 50)
+    // // JavaCard 2.2.2 supports Java 1.5 class files (class version 49)
+    // sourceCompatibility = 1.6
+    // targetCompatibility = 1.6
+    sourceCompatibility = 1.7
     targetCompatibility = 1.7
 }
 
 compileTestJava {
     options.compilerArgs = [
             '-Xlint:all',
+            '-Xlint:-options', //java 13 warns about Java 7 targetting
             '-Werror'
     ]
-    // JUnit 5 requires Java 8
+    // JUnit 5 requires Java 8 or newer
+    sourceCompatibility = 1.8
     targetCompatibility = 1.8
 }
 
@@ -111,26 +133,47 @@ task cap {
     doLast {
         ant.taskdef(name: 'javacard', classname: 'pro.javacard.ant.JavaCard', classpath: configurations.javacardAntTask.asPath)
 
+        // 1PAY.SYS.DDF01
         ant.javacard(jckit: 'oracle_javacard_sdks/jc305u3_kit') {
             cap (
-                package: 'emvcardsimulator.pse',
+                package: 'emvcardsimulator',
                 version: '0.1',
-                output: 'build/emvcardsimulator.cap',
-                jca: 'build/emvcardsimulator.jca',
+                output: 'build/pse.cap',
+                jca: 'build/pse.jca',
                 export: 'build',
                 classes: "build/classes/java/main",
-                aid: '010203040506') {
-                applet (class: 'emvcardsimulator.pse.PaymentSystemEnvironment', aid: '01020304050601')
+                aid: '315041592E000000000000000000') {
+                    applet (class: 'emvcardsimulator.PaymentSystemEnvironment', aid: '315041592E5359532E4444463031')
+            }
+        }
+
+        ant.javacard(jckit: 'oracle_javacard_sdks/jc305u3_kit') {
+            cap (
+                package: 'emvcardsimulator',
+                version: '0.1',
+                output: 'build/paymentapp.cap',
+                jca: 'build/paymentapp.jca',
+                export: 'build',
+                classes: "build/classes/java/main",
+                aid: 'AFFFFFFFFF0000') {
+                    applet (class: 'emvcardsimulator.PaymentApplication', aid: 'AFFFFFFFFF1234')
             }
         }
     }
 }
 
-task smartCardDeploy(type: Exec) {
+task deployPse(type: Exec) {
     dependsOn downloadGp, cap
     group "JavaCard"
-    description "Deploy application to Global Platform JavaCard"
+    description "Deploy PaymentSystemEnvironment applet to JavaCard"
 
-    // TODO: implement the actual deployement
-    commandLine 'java', '-jar', 'gp.jar', '-h'
+    commandLine 'java', '-jar', 'gp.jar', '--install', 'build/pse.cap'
+}
+
+task deployPaymentApp(type: Exec) {
+    dependsOn downloadGp, cap
+    group "JavaCard"
+    description "Deploy payment application applet to JavaCard"
+
+    commandLine 'java', '-jar', 'gp.jar', '--install', 'build/paymentapp.cap'
 }

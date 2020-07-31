@@ -1,0 +1,201 @@
+'50':
+  tag: '50'
+  name: 'Application Label'
+'57':
+  tag: '57'
+  name: 'Track 2 Equivalent Data'
+'61':
+  tag: '61'
+  name: 'Application Template'
+'70':
+  tag: '70'
+  name: 'EMV Proprietary Template'
+'73':
+  tag: '73'
+  name: 'Directory Discretionary Template'
+'77':
+  tag: '77'
+  name: 'Response Message Template Format 2'
+'80':
+  tag: '80'
+  name: 'Response Message Template Format 1'
+'82':
+  tag: '82'
+  name: 'Application Interchange Profile (AIP)'
+'84':
+  tag: '84'
+  name: 'Dedicated File (DF) Name'
+'87':
+  tag: '87'
+  name: 'Application Priority Indicator'
+'88':
+  tag: '88'
+  name: 'Short File Identifier (SFI)'
+'90':
+  tag: '90'
+  name: 'Issuer Public Key Certificate'
+'92':
+  tag: '92'
+  name: 'Issuer Public Key Remainder'
+'94':
+  tag: '94'
+  name: 'Application File Locator (AFL)'
+'95':
+  tag: '95'
+  name: 'Terminal Verification Results'
+'6F':
+  tag: '6F'
+  name: 'File Control Information (FCI) Template'
+'A5':
+  tag: 'A5'
+  name: 'File Control Information (FCI) Proprietary Template'
+'5F2D':
+  tag: '5F2D'
+  name: 'Language Preference'
+'BF0C':
+  tag: 'BF0C'
+  name: 'File Control Information (FCI) Issuer Discretionary Data'
+'4F':
+  tag: '4F'
+  name: 'Application Identifier (AID)'
+'5F20':
+  tag: '5F20'
+  name: 'Cardholder Name'
+'9F1F':
+  tag: '9F1F'
+  name: 'Track 1 Discretionary Data'
+'8F':
+  tag: '8F'
+  name: 'Certification Authority Public Key Index'
+'9F32':
+  tag: '9F32'
+  name: 'Issuer Public Key Exponent'
+'9F47':
+  tag: '9F47'
+  name: 'Integrated Circuit Card (ICC) Public Key Exponent'
+'9F46':
+  tag: '9F46'
+  name: 'Integrated Circuit Card (ICC) Public Key Certificate'
+'5F25':
+  tag: '5F25'
+  name: 'Application Effective Date'
+'5F24':
+  tag: '5F24'
+  name: 'Application Expiration Date'
+'5A':
+  tag: '5A'
+  name: 'Application Primary Account Number (PAN)'
+'5F34':
+  tag: '5F34'
+  name: 'Application Primary Account Number (PAN) Sequence Number'
+'9F07':
+  tag: '9F07'
+  name: 'Application Usage Control'
+'8E':
+  tag: '8E'
+  name: 'Cardholder Verification Method (CVM) List'
+'9F0D':
+  tag: '9F0D'
+  name: 'Issuer Action Code – Default'
+'9F0E':
+  tag: '9F0E'
+  name: 'Issuer Action Code – Denial'
+'9F0F':
+  tag: '9F0F'
+  name: 'Issuer Action Code – Online'
+'9F4A':
+  tag: '9F4A'
+  name: 'Static Data Authentication Tag List'
+'8C':
+  tag: '8C'
+  name: 'Card Risk Management Data Object List 1 (CDOL1)'
+'8D':
+  tag: '8D'
+  name: 'Card Risk Management Data Object List 2 (CDOL2)'
+'5F28':
+  tag: '5F28'
+  name: 'Issuer Country Code'
+'9F42':
+  tag: '9F42'
+  name: 'Application Currency Code'
+'9F44':
+  tag: '9F44'
+  name: 'Application Currency Exponent'
+'9F49':
+  tag: '9F49'
+  name: 'Dynamic Data Authentication Data Object List (DDOL)'
+'9F08':
+  tag: '9F08'
+  name: 'Application Version Number'
+'9F02':
+  tag: '9F02'
+  name: 'Amount, Authorised (Numeric)'
+'9F03':
+  tag: '9F03'
+  name: 'Amount, Other (Numeric)'
+'9F1A':
+  tag: '9F1A'
+  name: 'Terminal Country Code'
+'5F2A':
+  tag: '5F2A'
+  name: 'Transaction Currency Code'
+'9A':
+  tag: '9A'
+  name: 'Transaction Date'
+'9C':
+  tag: '9C'
+  name: 'Transaction Type'
+'9F37':
+  tag: '9F37'
+  name: 'Unpredictable Number'
+'8A':
+  tag: '8A'
+  name: 'Authorisation Response Code'
+'9F4B':
+  tag: '9F4B'
+  name: 'Signed Dynamic Application Data'
+'9F48':
+  tag: '9F48'
+  name: 'Integrated Circuit Card (ICC) Public Key Remainder'
+'9F27':
+  tag: '9F27'
+  name: 'Cryptogram Information Data (CID)'
+'9F36':
+  tag: '9F36'
+  name: 'Application Transaction Counter (ATC)'
+'9F26':
+  tag: '9F26'
+  name: 'Application Cryptogram (AC)'
+'9F10':
+  tag: '9F10'
+  name: 'Issuer Application Data (IAD)'
+'9F35':
+  tag: '9F35'
+  name: 'Terminal Type'
+'9F45':
+  tag: '9F45'
+  name: 'Data Authentication Code'
+'9F4C':
+  tag: '9F4C'
+  name: 'ICC Dynamic Number'
+'9F33':
+  tag: '9F33'
+  name: 'Terminal Capabilities'
+'9F34':
+  tag: '9F34'
+  name: 'Cardholder Verification Method (CVM) Results'
+'9F11':
+  tag: '9F11'
+  name: 'Issuer Code Table Index'
+'9F12':
+  tag: '9F12'
+  name: 'Application Preferred Name'
+'9F2E':
+  tag: '9F2E'
+  name: 'Integrated Circuit Card (ICC) PIN Encipherment Public Key Exponent'
+'9F2F':
+  tag: '9F2F'
+  name: 'Integrated Circuit Card (ICC) PIN Encipherment Public Key Remainder'
+'9F2D':
+  tag: '9F2D'
+  name: 'Integrated Circuit Card (ICC) PIN Encipherment Public Key Certificate'

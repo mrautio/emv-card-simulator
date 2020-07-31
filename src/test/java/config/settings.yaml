@@ -1,0 +1,45 @@
+terminal:
+  use_random: true
+  capabilities:
+    sda: false
+    dda: true
+    cda: false
+    plaintext_pin: true
+    enciphered_pin: true
+    terminal_risk_management: true
+    issuer_authentication: false
+  tvr:
+    offline_data_authentication_was_not_performed: false
+    sda_failed: false
+    icc_data_missing: false
+    card_appears_on_terminal_exception_file: false
+    dda_failed: false
+    cda_failed: false
+    icc_and_terminal_have_different_application_versions: false
+    expired_application: false
+    application_not_yet_effective: false
+    requested_service_not_allowed_for_card_product: false
+    new_card: false
+    cardholder_verification_was_not_successful: false
+    unrecognised_cvm: false
+    pin_try_limit_exceeded: false
+    pin_entry_required_and_pin_pad_not_present_or_not_working: false
+    pin_entry_required_pin_pad_present_but_pin_was_not_entered: false
+    online_pin_entered: false
+    transaction_exceeds_floor_limit: false
+    lower_consecutive_offline_limit_exceeded: false
+    upper_consecutive_offline_limit_exceeded: false
+    transaction_selected_randomly_for_online_processing: false
+    merchant_forced_transaction_online: false
+    default_tdol_used: false
+    issuer_authentication_failed: false
+    script_processing_failed_before_final_generate_ac: false
+    script_processing_failed_after_final_generate_ac : false
+default_tags:
+  '9F02': '000000000001'
+  '9F03': '000000000000'
+  '9F1A': '0246'
+  '5F2A': 0978
+  '9C': '21'
+  '9F35': '23'
+  '9F45': '0000'

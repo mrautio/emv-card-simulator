@@ -1,0 +1,9 @@
+appenders:
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{d(%Y-%m-%d %H:%M:%S%.6f %Z)} {l} {t} - {m}{n}"
+root:
+  level: trace
+  appenders:
+    - stdout
