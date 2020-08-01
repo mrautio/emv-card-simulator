@@ -1,3 +1,6 @@
 .git
 .gradle
 build
+**/target
+**/Cargo.lock
+gp.jar
