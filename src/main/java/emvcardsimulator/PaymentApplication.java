@@ -280,6 +280,9 @@ public class PaymentApplication extends EmvApplet {
         short cmd = Util.getShort(buf, ISO7816.OFFSET_CLA);
 
         switch (cmd) {
+            case CMD_SELECT:
+                processSelect(apdu, buf);
+                break;
             case CMD_SET_SETTINGS:
                 processSetSettings(apdu, buf);
                 break;            
@@ -292,8 +295,8 @@ public class PaymentApplication extends EmvApplet {
             case CMD_SET_READ_RECORD_TEMPLATE:
                 processSetReadRecordTemplate(apdu, buf);
                 break;
-            case CMD_SELECT:
-                processSelect(apdu, buf);
+            case CMD_FACTORY_RESET:
+                factoryReset(apdu, buf);
                 break;
             default:
                 break;

@@ -1,6 +1,9 @@
 # Select PSE AID
 - req: '00 A4 04 00 0E 31 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
   res: '90 00'
+# "Factory reset"
+- req: 'E0 05 00 00 00'
+  res: '90 00'
 # Setup tag templates
 - req: 'E0 02 00 06 04 DF 02 DF 47'
   res: '90 00'

@@ -36,6 +36,10 @@ public class PaymentSystemEnvironmentTest {
     public void selectTest() throws CardException {
         ResponseAPDU response = SmartCard.transmitCommand(new byte[] {(byte) 0x00, (byte) 0xA4, (byte) 0x04, (byte) 0x00, (byte) 0x0E, (byte) 0x31, (byte) 0x50, (byte) 0x41, (byte) 0x59, (byte) 0x2E, (byte) 0x53, (byte) 0x59, (byte) 0x53, (byte) 0x2E, (byte) 0x44, (byte) 0x44, (byte) 0x46, (byte) 0x30, (byte) 0x31 });
         assertEquals(ISO7816.SW_NO_ERROR, (short) response.getSW());
+
+        // Reset card setup
+        response = SmartCard.transmitCommand(new byte[] {(byte) 0xE0, (byte) 0x05, (byte) 0x00, (byte) 0x00, (byte) 0x00});
+        assertEquals(ISO7816.SW_NO_ERROR, (short) response.getSW());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package emvcardsimulator;
 
+import javacard.framework.JCSystem;
 import javacard.framework.Util;
 
 public class ReadRecord extends TagTemplate {
@@ -58,6 +59,62 @@ public class ReadRecord extends TagTemplate {
         }
 
         return null;
+    }
+
+    /**
+     * Remove all stored records.
+     */
+    public static short clear() {
+        short count = (short) 0;
+
+        for (ReadRecord iter = ReadRecord.head; iter != null; ) {
+            short iterRecord = Util.getShort(iter.record, (short) 0);
+
+            iter = iter.next;
+
+            if (removeRecord(iterRecord)) {
+                count++;
+            }
+        }    
+
+        if (JCSystem.isObjectDeletionSupported()) {
+            JCSystem.requestObjectDeletion();
+        }
+
+        return count;
+    }
+
+    /**
+     * Remove record.
+     */
+    public static boolean removeRecord(short recordId) {
+        ReadRecord record = findRecord(recordId);
+        if (record == null) {
+            return false;
+        }
+
+        ReadRecord previousRecord = record.previous;
+        ReadRecord nextRecord = record.next;
+
+        if (head == record) {
+            return false;
+        }
+
+        JCSystem.beginTransaction();
+
+        if (tail == record) {
+            tail = previousRecord;
+        }
+        if (previousRecord != null) {
+            previousRecord.next = nextRecord;
+        }
+        if (nextRecord != null) {
+            nextRecord.previous = previousRecord;
+        }
+
+        JCSystem.commitTransaction();
+
+        return true;
     }
 
     /**

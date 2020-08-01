@@ -26,6 +26,29 @@ public class SmartCard {
 
     private static Card card;
 
+    private static boolean logging = true;
+
+    private static String toHexString(byte[] buf, int offset, int length) {
+        if (length == 0) {
+            return "[]";
+        }
+
+        String result = "[";
+        for (int i = offset; i < offset + length - 1; i++) {
+            result += String.format("%02X, ", buf[i]);
+        }
+        result += String.format("%02X]", buf[offset + length - 1]);
+
+        return result;
+    }
+
+    /**
+     * Enable or disable logging.
+     */
+    public static void setLogging(boolean logging) {
+        SmartCard.logging = logging;
+    }
+
     /**
      * Send APDU command data.
      * @throws CardException
@@ -39,7 +62,17 @@ public class SmartCard {
      * @throws CardException
      */
     public static ResponseAPDU transmitCommand(CommandAPDU data) throws CardException {
-        return cardSimulator.transmitCommand(data);
+        if (logging) {
+            System.out.println("REQUEST : " + data + " = " + SmartCard.toHexString(data.getBytes(), 0, data.getBytes().length));
+        }
+
+        ResponseAPDU response = cardSimulator.transmitCommand(data);
+
+        if (logging) {
+            System.out.println("RESPONSE: " + response + " = " + SmartCard.toHexString(response.getBytes(), 0, response.getBytes().length));
+        }
+
+        return response;
     }
 
     /**

@@ -1,6 +1,9 @@
 # Select paymentapp AID
 - req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
   res: '90 00'
+# "Factory reset"
+- req: 'E0 05 00 00 00'
+  res: '90 00'
 # Setup settings
 # Pin code
 - req: 'E0 00 00 01 02 12 34'

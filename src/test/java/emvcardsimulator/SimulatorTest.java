@@ -23,18 +23,15 @@ public class SimulatorTest {
 
     private static native void entryPoint(SimulatorTest callback);
 
+    /**
+     * Setup smart card for the use with the simulator.
+     * @throws CardException
+     */
     @BeforeAll
-    public static void setup() {
+    public static void setup() throws CardException {
         System.loadLibrary("simulator");
 
-    }
-
-    @AfterAll
-    public static void disconnect() {
-    }
-
-    @Test
-    public void simulatorEndToEndTransactionTest() throws CardException {
+        SmartCard.setLogging(false);
         SmartCard.connect();
 
         // 1PAY.SYS.DDF01
@@ -42,11 +39,17 @@ public class SimulatorTest {
         byte[] aid = new byte[] { (byte) 0xAF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,  (byte) 0xFF, (byte) 0x12, (byte) 0x34 };
         SmartCard.install(pseAid, PaymentSystemEnvironmentContainer.class);
         SmartCard.install(aid, PaymentApplicationContainer.class);
+    }
 
-
-        SimulatorTest.entryPoint(new SimulatorTest());
-
+    @AfterAll
+    public static void disconnect() throws CardException {
         SmartCard.disconnect();
+        SmartCard.setLogging(true);
+    }
+
+    @Test
+    public void simulatorEndToEndTransactionTest() {
+        SimulatorTest.entryPoint(new SimulatorTest());
     }
 
     private void printAsHex(String type, byte[] buf) {

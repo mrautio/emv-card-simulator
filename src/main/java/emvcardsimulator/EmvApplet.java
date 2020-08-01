@@ -43,6 +43,7 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_SET_EMV_TAG               = (short) 0xE001;
     protected static final short CMD_SET_TAG_TEMPLATE          = (short) 0xE002;
     protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0xE003;
+    protected static final short CMD_FACTORY_RESET             = (short) 0xE005;
     protected static final short CMD_SELECT = (short) 0x00A4;
     protected static final short CMD_READ_RECORD = (short) 0x00B2;
     protected static final short CMD_DDA = (short) 0x0088;
@@ -66,8 +67,29 @@ public abstract class EmvApplet extends Applet {
     protected TagTemplate tagBf0cFci;
 
 
-    protected short responseTemplateTag = (short) 0x0077;
-    protected boolean randomResponseSuffixData = false;
+    protected short responseTemplateTag;
+    protected boolean randomResponseSuffixData;
+
+    protected void factoryReset(APDU apdu, byte[] buf) {
+        if (Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0000) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        factoryReset();
+
+        ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    protected void factoryReset() {
+        JCSystem.beginTransaction();
+
+        responseTemplateTag = (short) 0x0077;
+        randomResponseSuffixData = false;
+
+        JCSystem.commitTransaction();
+
+        ReadRecord.clear();
+    }
 
     protected void processSetEmvTag(APDU apdu, byte[] buf) {
         short tagId = Util.getShort(buf, ISO7816.OFFSET_P1);
@@ -199,6 +221,8 @@ public abstract class EmvApplet extends Applet {
     protected EmvApplet() {
         tmpBuffer = JCSystem.makeTransientByteArray((short) 255, JCSystem.CLEAR_ON_DESELECT);
         
+        factoryReset();
+
         responseTemplateGetProcessingOptions = new TagTemplate();
         responseTemplateDda = new TagTemplate();
         responseTemplateGenerateAc = new TagTemplate();
