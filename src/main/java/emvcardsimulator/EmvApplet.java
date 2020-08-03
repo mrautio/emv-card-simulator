@@ -14,25 +14,26 @@ import javacard.security.RandomData;
 import javacardx.crypto.Cipher;
 
 public abstract class EmvApplet extends Applet {
-    /*
-    // for dev "debugging"
-    protected void printAsHex(String type, byte[] buf) {
+    /*// for dev "debugging"
+    static void printAsHex(String type, byte[] buf) {
         printAsHex(type, buf, 0, buf.length);
     }
-    protected void printAsHex(String type, byte[] buf, int offset, int length) {
+
+    static void printAsHex(String type, byte[] buf, int offset, int length) {
         System.out.println(String.format("%s [%02X] %s", type, length, toHexString(buf, offset, length)));
     }
-    protected String toHexString(byte[] buf, int offset, int length) {
+
+    static String toHexString(byte[] buf, int offset, int length) {
         String result = "[";
-        for(int i = offset; i < offset+length-1; i++) {
+        for (int i = offset; i < offset + length - 1; i++) {
             result += String.format("%02X, ", buf[i]);
         }
-        result += String.format("%02X]", buf[offset+length-1]);
+        result += String.format("%02X]", buf[offset + length - 1]);
 
         return result;
     }
 
-    protected void printEmvTags() {
+    static void printEmvTags() {
         for (EmvTag iter = EmvTag.getHead(); iter != null; iter = iter.getNext()) {
             printAsHex(toHexString(iter.getTag(), 0, 2), iter.getData(), 0, (iter.getLength() & 0x00FF));
         }
@@ -41,9 +42,11 @@ public abstract class EmvApplet extends Applet {
 
     protected static final short CMD_SET_SETTINGS              = (short) 0xE000;
     protected static final short CMD_SET_EMV_TAG               = (short) 0xE001;
+    protected static final short CMD_SET_EMV_TAG_FUZZ          = (short) 0xE011;
     protected static final short CMD_SET_TAG_TEMPLATE          = (short) 0xE002;
     protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0xE003;
     protected static final short CMD_FACTORY_RESET             = (short) 0xE005;
+    protected static final short CMD_LOG_CONSUME               = (short) 0xE006;
     protected static final short CMD_SELECT = (short) 0x00A4;
     protected static final short CMD_READ_RECORD = (short) 0x00B2;
     protected static final short CMD_DDA = (short) 0x0088;
@@ -53,8 +56,13 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_GET_PROCESSING_OPTIONS = (short) 0x80A8;
     protected static final short CMD_GENERATE_AC = (short) 0x80AE;
 
-    protected RandomData randomData;
-    protected byte[] tmpBuffer;
+    public static RandomData randomData;
+    public static byte[] tmpBuffer;
+
+    protected static void logAndThrow(short responseTrailer) {
+        ApduLog.addLogEntry(responseTrailer);
+        ISOException.throwIt(responseTrailer);
+    }
 
     protected EmvTag emvTags;
     protected ReadRecord readRecords;
@@ -88,7 +96,40 @@ public abstract class EmvApplet extends Applet {
 
         JCSystem.commitTransaction();
 
+        ApduLog.clear();
         ReadRecord.clear();
+        EmvTag.clear();
+    }
+
+    protected void consumeLogs(APDU apdu, byte[] buf) {
+        short p1p2 = Util.getShort(buf, ISO7816.OFFSET_P1);
+        switch (p1p2) {
+            case (short) 0x0000:
+                ApduLog logEntry = ApduLog.getHead();
+
+                if (logEntry != null) {
+                    // hack to omit AID SELECT for reading the logs
+                    if (logEntry.next == ApduLog.tail && Util.getShort(logEntry.getData(), (short) 0) == 0x00A4) {
+                        ApduLog.clear();
+                        ISOException.throwIt(ISO7816.SW_RECORD_NOT_FOUND);
+                    }
+
+                    Util.arrayCopy(logEntry.getData(), (short) 0, buf, (short) 0, (short) (logEntry.getLength() & 0x00FF));
+                    ApduLog.removeLog(logEntry);
+                    apdu.setOutgoingAndSend((short) 0, (short) (logEntry.getLength() & 0x00FF));
+                } else {
+                    ISOException.throwIt(ISO7816.SW_RECORD_NOT_FOUND);
+                }
+
+                break;
+            case (short) 0x0100:
+                ApduLog.clear();
+                ISOException.throwIt(ISO7816.SW_NO_ERROR);
+                break;
+            default:
+                ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+                break;
+        }
     }
 
     protected void processSetEmvTag(APDU apdu, byte[] buf) {
@@ -98,6 +139,22 @@ public abstract class EmvApplet extends Applet {
         }
 
         EmvTag tag = EmvTag.setTag(tagId, buf, (short) ISO7816.OFFSET_CDATA, buf[ISO7816.OFFSET_LC]);
+
+        ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    protected void processSetEmvTagFuzz(APDU apdu, byte[] buf) {
+        short tagId = Util.getShort(buf, ISO7816.OFFSET_P1);
+
+        EmvTag tag = EmvTag.findTag(tagId);
+        if (tag == null) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        tag.fuzzOffset     = buf[(short) (ISO7816.OFFSET_CDATA)];
+        tag.fuzzLength     = buf[(short) (ISO7816.OFFSET_CDATA + 1)];
+        tag.fuzzFlags      = buf[(short) (ISO7816.OFFSET_CDATA + 2)];
+        tag.fuzzOccurrence = buf[(short) (ISO7816.OFFSET_CDATA + 3)];
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
     }
@@ -161,7 +218,7 @@ public abstract class EmvApplet extends Applet {
             // Template 1, tag 80
             templateTagLength = template.expandTagDataToArray(tmpBuffer, (short) 0);
         } else {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
 
         EmvTag.setTag(responseTemplateTag, tmpBuffer, (short) 0, (byte) templateTagLength);
@@ -171,31 +228,21 @@ public abstract class EmvApplet extends Applet {
     protected void sendResponse(APDU apdu, byte[] buf, short tagId) {
         EmvTag tag = EmvTag.findTag(tagId);
         if (tag == null) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
 
         short dataOffset = tag.copyToArray(buf, (short) ISO7816.OFFSET_CDATA);
         short dataLength = (short) (dataOffset - ISO7816.OFFSET_CDATA);
 
-        apdu.setOutgoingAndSend(ISO7816.OFFSET_CDATA, dataLength);
+        sendResponse(apdu, buf, buf, (short) 0, dataLength);
     }
 
-    protected void sendResponse(APDU apdu, byte[] buf, byte[] data) {
-        short length = (short) data.length;
-        if (randomResponseSuffixData) {
-            short maxLength = (short) ((buf.length - ISO7816.OFFSET_CDATA) & 0x00FF);
-
-            randomData.generateData(buf, (short) ISO7816.OFFSET_CDATA, maxLength);
-
-            short extraLength = (short) (buf[ISO7816.OFFSET_CDATA] & 0x00FF);
-            length += extraLength;
-
-            if (length > maxLength) {
-                length = maxLength;
-            }
+    protected void sendResponse(APDU apdu, byte[] buf, byte[] data, short dataOffset, short length) {
+        if (data != buf) {
+            Util.arrayCopy(data, dataOffset, buf, ISO7816.OFFSET_CDATA, length);
         }
 
-        Util.arrayCopy(data, (short) 0, buf, ISO7816.OFFSET_CDATA, (short) data.length);
+        ApduLog.addLogEntry(buf, ISO7816.OFFSET_CDATA, (byte) length);
         apdu.setOutgoingAndSend(ISO7816.OFFSET_CDATA, length);
     }
 
@@ -204,7 +251,7 @@ public abstract class EmvApplet extends Applet {
 
         ReadRecord readRecord = ReadRecord.findRecord(p1p2);
         if (readRecord == null) {
-            ISOException.throwIt(ISO7816.SW_RECORD_NOT_FOUND);
+            EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
         }
 
         short tag70Length = readRecord.expandTlvToArray(tmpBuffer, (short) 0);
@@ -212,7 +259,7 @@ public abstract class EmvApplet extends Applet {
         EmvTag tag = EmvTag.setTag((short) 0x0070, tmpBuffer, (short) 0, (byte) tag70Length);
 
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x00 && buf[ISO7816.OFFSET_LC] != tag.getLength()) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+            EmvApplet.logAndThrow(ISO7816.SW_WRONG_LENGTH);
         }
 
         sendResponse(apdu, buf, (short) 0x0070);
@@ -230,9 +277,9 @@ public abstract class EmvApplet extends Applet {
         tagA5Fci = new TagTemplate();
         tagBf0cFci = new TagTemplate();
 
-        emvTags = EmvTag.setTag((short) 0x00, tmpBuffer, (short) 0, (byte) 0);
+        //emvTags = EmvTag.setTag((short) 0x00, tmpBuffer, (short) 0, (byte) 0);
 
-        readRecords = ReadRecord.setRecord((short) 0x00, tmpBuffer, (short) 0, (byte) 0);
+        //readRecords = ReadRecord.setRecord((short) 0x00, tmpBuffer, (short) 0, (byte) 0);
 
         randomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
     }

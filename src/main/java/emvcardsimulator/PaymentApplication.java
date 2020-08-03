@@ -6,6 +6,7 @@ import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
+import javacard.security.CryptoException;
 import javacard.security.KeyBuilder;
 import javacard.security.MessageDigest;
 import javacard.security.RSAPrivateKey;
@@ -23,7 +24,6 @@ public class PaymentApplication extends EmvApplet {
     private MessageDigest shaMessageDigest;
     private byte[] challenge;
     private byte[] tag9f4cDynamicNumber;
-
 
     private RSAPrivateKey rsaPrivateKey = null;
     private short rsaPrivateKeyByteSize = 0;
@@ -48,8 +48,30 @@ public class PaymentApplication extends EmvApplet {
                 break;
             // ICC RSA KEY MODULUS
             case 0x0004:
-                rsaPrivateKey.setModulus(buf, (short) ISO7816.OFFSET_CDATA, (short) (buf[ISO7816.OFFSET_LC] & 0x00FF));
                 rsaPrivateKeyByteSize = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
+                short keyLength = (short) (rsaPrivateKeyByteSize * 8);
+                switch (keyLength) {
+                    case (short) 1024:
+                        keyLength = KeyBuilder.LENGTH_RSA_1024;
+                        break;
+                    case (short) 1280:
+                        keyLength = KeyBuilder.LENGTH_RSA_1280;
+                        break;
+                    case (short) 1536:
+                        keyLength = KeyBuilder.LENGTH_RSA_1536;
+                        break;
+                    case (short) 1984:
+                        keyLength = KeyBuilder.LENGTH_RSA_1984;
+                        break;
+                    default:
+                        throw new CryptoException(CryptoException.ILLEGAL_USE);
+                }
+
+                // XXX. JCardSim doesn't do "throw new CryptoException(CryptoException.ILLEGAL_VALUE)" as specified in the Java Card documentation. I.e. Sim allows any key size but JavaCard needs specific, hence keyLength is determined.
+                rsaPrivateKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, keyLength, false);
+                rsaPrivateKey.clearKey();
+
+                rsaPrivateKey.setModulus(buf, (short) ISO7816.OFFSET_CDATA, rsaPrivateKeyByteSize);
                 break;
             // ICC RSA KEY PRIVATE EXPONENT
             case 0x0005:
@@ -73,9 +95,6 @@ public class PaymentApplication extends EmvApplet {
 
         rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_NOPAD, false);
 
-        rsaPrivateKey = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, KeyBuilder.LENGTH_RSA_512, false);
-        rsaPrivateKey.clearKey();
-
         shaMessageDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA, false);
     }
 
@@ -94,12 +113,12 @@ public class PaymentApplication extends EmvApplet {
                 EmvTag.setTag((short) 0x6F, tmpBuffer, (short) 0, (byte) length);
                 sendResponse(apdu, buf, (short) 0x6F);
             } else {
-                ISOException.throwIt(ISO7816.SW_APPLET_SELECT_FAILED);
+                EmvApplet.logAndThrow(ISO7816.SW_APPLET_SELECT_FAILED);
             }
 
         } else {
             // NO PAN, we're probably in the setup phase
-            ISOException.throwIt(ISO7816.SW_NO_ERROR);
+            EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
         }
     }
 
@@ -117,11 +136,11 @@ public class PaymentApplication extends EmvApplet {
 
     private void processGenerateAc(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x4000) {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
         }
 
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x1D) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
 
         // TODO: check the query
@@ -134,7 +153,7 @@ public class PaymentApplication extends EmvApplet {
 
     private void processGetData(APDU apdu, byte[] buf) {
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x05) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
 
         sendResponse(apdu, buf, Util.getShort(buf, ISO7816.OFFSET_P1));
@@ -142,16 +161,17 @@ public class PaymentApplication extends EmvApplet {
 
     private void processGetProcessingOptions(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x00) {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+
         }
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x02) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
         if (buf[ISO7816.OFFSET_CDATA] != (byte) 0x83) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
         if (buf[ISO7816.OFFSET_CDATA + 1] != (byte) 0x00) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
 
         sendResponseTemplate(apdu, buf, responseTemplateGetProcessingOptions);
@@ -159,7 +179,7 @@ public class PaymentApplication extends EmvApplet {
 
     private void processDynamicDataAuthentication(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x0000) {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
         }
 
         short signedDataSize = rsaPrivateKeyByteSize;
@@ -197,7 +217,7 @@ public class PaymentApplication extends EmvApplet {
         // Cheapo pin compare for four(4) number pin
 
         if (pinCode.length != 2) {
-            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
         }
 
         short actualPin = Util.getShort(pinCode, (short) 0);
@@ -207,11 +227,11 @@ public class PaymentApplication extends EmvApplet {
         final short swVerifyFail = (short) 0x63C3; // C3 = 3 tries left
 
         if (givenPinEnd != (short) 0xFFFF) {
-            ISOException.throwIt(swVerifyFail);
+            EmvApplet.logAndThrow(swVerifyFail);
         }
 
         if (actualPin != givenPin) {
-            ISOException.throwIt(swVerifyFail);
+            EmvApplet.logAndThrow(swVerifyFail);
         }
     }
 
@@ -219,33 +239,33 @@ public class PaymentApplication extends EmvApplet {
         short p1p2 = Util.getShort(buf, ISO7816.OFFSET_P1);
         if (p1p2 == (short) 0x0080) {
             if (buf[ISO7816.OFFSET_LC] != (byte) 0x08) {
-                ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
             }
 
             comparePin(buf, (short) (ISO7816.OFFSET_CDATA + 1));
         } else if (p1p2 == (short) 0x0088) {
             short length = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
             if ((byte) length != (byte) 0x80) {
-                ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
             }
 
             rsaCipher.init(rsaPrivateKey, Cipher.MODE_DECRYPT);
             rsaCipher.doFinal(buf, ISO7816.OFFSET_CDATA, length, tmpBuffer, (short) 0);
 
             if (tmpBuffer[0] != (byte) 0x7F) {
-                ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
             }
 
             if (Util.arrayCompare(challenge, (short) 0, tmpBuffer, (short) 9, (short) challenge.length) != (byte) 0x00) {
-                ISOException.throwIt(ISO7816.SW_DATA_INVALID);                
+                EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
             }
 
             comparePin(tmpBuffer, (short) 2);
         } else {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
         }
 
-        ISOException.throwIt(ISO7816.SW_NO_ERROR);
+        EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
     }
 
     private void arrayRandomFill(byte[] dst) {
@@ -257,18 +277,18 @@ public class PaymentApplication extends EmvApplet {
 
     private void processGetChallenge(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x00) {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
         }
 
         short outputLength = (short) challenge.length;
 
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x00 && buf[ISO7816.OFFSET_LC] != (byte) outputLength) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+            EmvApplet.logAndThrow(ISO7816.SW_WRONG_LENGTH);
         }
 
         arrayRandomFill(challenge);
 
-        sendResponse(apdu, buf, challenge);
+        sendResponse(apdu, buf, challenge, (short) 0, outputLength);
     }
 
     /**
@@ -277,27 +297,35 @@ public class PaymentApplication extends EmvApplet {
     public void process(APDU apdu) {
         byte[] buf = apdu.getBuffer(); 
 
+        ApduLog.addLogEntry(buf, (short) 0, (byte) (buf[ISO7816.OFFSET_LC] + 5));
+
         short cmd = Util.getShort(buf, ISO7816.OFFSET_CLA);
 
         switch (cmd) {
             case CMD_SELECT:
                 processSelect(apdu, buf);
-                break;
+                return;
             case CMD_SET_SETTINGS:
                 processSetSettings(apdu, buf);
-                break;            
+                return;            
             case CMD_SET_EMV_TAG:
                 processSetEmvTag(apdu, buf);
-                break;
+                return;
+            case CMD_SET_EMV_TAG_FUZZ:
+                processSetEmvTagFuzz(apdu, buf);
+                return;
             case CMD_SET_TAG_TEMPLATE:
                 processSetTagTemplate(apdu, buf);
-                break;
+                return;
             case CMD_SET_READ_RECORD_TEMPLATE:
                 processSetReadRecordTemplate(apdu, buf);
-                break;
+                return;
             case CMD_FACTORY_RESET:
                 factoryReset(apdu, buf);
-                break;
+                return;
+            case CMD_LOG_CONSUME:
+                consumeLogs(apdu, buf);
+                return;
             default:
                 break;
         }
@@ -329,7 +357,7 @@ public class PaymentApplication extends EmvApplet {
                 processGenerateAc(apdu, buf);
                 break;
             default:
-                ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
+                EmvApplet.logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
         }
 
     }

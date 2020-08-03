@@ -96,12 +96,11 @@ public class ReadRecord extends TagTemplate {
         ReadRecord previousRecord = record.previous;
         ReadRecord nextRecord = record.next;
 
-        if (head == record) {
-            return false;
-        }
-
         JCSystem.beginTransaction();
 
+        if (head == record) {
+            head = nextRecord;
+        }
         if (tail == record) {
             tail = previousRecord;
         }

@@ -1,5 +1,6 @@
 package emvcardsimulator;
 
+import javacard.framework.JCSystem;
 import javacard.framework.Util;
 
 public class EmvTag {
@@ -12,6 +13,11 @@ public class EmvTag {
     private byte[] tag;
     private byte[] data;
     private byte   length;
+
+    public byte fuzzOffset      = (byte) 0x00;
+    public byte fuzzLength      = (byte) 0x00;
+    public byte fuzzFlags       = (byte) 0x00;
+    public byte fuzzOccurrence  = (byte) 0x00;
 
     protected EmvTag(short tagId, byte[] src, short srcOffset, byte length) {
         tag = new byte[2];
@@ -61,6 +67,61 @@ public class EmvTag {
         }
 
         return null;
+    }
+
+    /**
+     * Remove all stored tags.
+     */
+    public static short clear() {
+        short count = (short) 0;
+
+        for (EmvTag iter = EmvTag.head; iter != null; ) {
+            short iterTag = Util.getShort(iter.tag, (short) 0);
+
+            iter = iter.next;
+
+            if (removeTag(iterTag)) {
+                count++;
+            }
+        }    
+
+        if (JCSystem.isObjectDeletionSupported()) {
+            JCSystem.requestObjectDeletion();
+        }
+
+        return count;
+    }
+
+    /**
+     * Remove tag.
+     */
+    public static boolean removeTag(short tagId) {
+        EmvTag tag = findTag(tagId);
+        if (tag == null) {
+            return false;
+        }
+
+        EmvTag previousTag = tag.previous;
+        EmvTag nextTag = tag.next;
+
+        JCSystem.beginTransaction();
+
+        if (head == tag) {
+            head = nextTag;
+        }
+        if (tail == tag) {
+            tail = previousTag;
+        }
+        if (previousTag != null) {
+            previousTag.next = nextTag;
+        }
+        if (nextTag != null) {
+            nextTag.previous = previousTag;
+        }
+
+        JCSystem.commitTransaction();
+
+        return true;
     }
 
     /**
@@ -121,17 +182,24 @@ public class EmvTag {
         }
 
         short shortLength = (short) (length & 0x00FF);
-        if (shortLength < 128) {
-            dst[copyOffset] = length;
-            copyOffset += 1;
-        } else {
+        if (shortLength >= 128) {
             dst[copyOffset] = (byte) 0x81;
-            copyOffset += 1;
-            dst[copyOffset] = length;
             copyOffset += 1;
         }
 
+        short lengthOffset = copyOffset;
+        copyOffset += 1;
         copyOffset = copyDataToArray(dst, copyOffset);
+
+        dst[lengthOffset] = length;
+
+        // re-write tag length with fuzz overflow?
+        if (fuzzLength > 0x00 && (fuzzFlags & (1 << 0)) == 1) {
+            // TODO: How to handle the case that tag length would need to be represented as two bytes instead of one?
+            dst[lengthOffset] = (byte) (copyOffset - lengthOffset - 1);
+        }
+
+
 
         return copyOffset;
     }
@@ -143,6 +211,23 @@ public class EmvTag {
         short shortLength = (short) (length & 0x00FF);
 
         Util.arrayCopy(data, (short) 0, dst, dstOffset, shortLength);
+
+        if (fuzzLength > (byte) 0x00) {
+            byte doFuzzing = (byte) 0x00;
+
+            if (fuzzOccurrence > (byte) 0x00) {
+                EmvApplet.randomData.generateData(EmvApplet.tmpBuffer, (short) 0, (short) 1);
+                doFuzzing = (byte) (EmvApplet.tmpBuffer[(short) 0] % fuzzOccurrence);
+            }
+
+            if (doFuzzing == (byte) 0x00) {
+                EmvApplet.randomData.generateData(dst, (short) (dstOffset + (fuzzOffset & 0x00FF)), (short) (fuzzLength & 0x00FF));
+
+                if (fuzzLength + fuzzOffset > shortLength) {
+                    shortLength = (short) ((fuzzLength & 0x00FF) + (fuzzOffset & 0x00FF));
+                }
+            }
+        }
 
         return (short) (dstOffset + shortLength);
     }

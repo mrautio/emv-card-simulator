@@ -71,23 +71,24 @@ impl ApduRequestResponse {
     fn to_raw_vec(s : &String) -> Vec<u8> {
         hex::decode(s.replace(" ", "")).unwrap()
     }
-}
 
-fn execute_setup_apdus(connection : &mut EmvConnection, setup_file : &str) -> Result<(), String> {
-    // Setup the app ICC data
-    let card_setup_data : Vec<ApduRequestResponse> = serde_yaml::from_str(&fs::read_to_string(setup_file).unwrap()).unwrap();
-    for apdu in card_setup_data {
-        let request = ApduRequestResponse::to_raw_vec(&apdu.req);
-        let response = ApduRequestResponse::to_raw_vec(&apdu.res);
+    fn execute_setup_apdus(connection : &mut EmvConnection, setup_file : &str) -> Result<(), String> {
+        // Setup the app ICC data
+        let card_setup_data : Vec<ApduRequestResponse> = serde_yaml::from_str(&fs::read_to_string(setup_file).unwrap()).unwrap();
+        for apdu in card_setup_data {
+            let request = ApduRequestResponse::to_raw_vec(&apdu.req);
+            let response = ApduRequestResponse::to_raw_vec(&apdu.res);
 
-        let (response_trailer, _) = connection.send_apdu(&request);
-        if &response_trailer[..] != &response[..] {
-            return Err(format!("Response not what expected! expected:{:02X?}, actual:{:02X?}", &response[..], &response_trailer[..]));
+            let (response_trailer, _) = connection.send_apdu(&request);
+            if &response_trailer[..] != &response[..] {
+                return Err(format!("Response not what expected! expected:{:02X?}, actual:{:02X?}", &response[..], &response_trailer[..]));
+            }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
 }
+
 
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
@@ -112,12 +113,12 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
         connection.interface = Some(ApduInterface::Function(java_card_apdu_interface));
 
         // Setup the PSE ICC data
-        execute_setup_apdus(&mut connection, "../config/card_setup_pse_apdus.yaml").unwrap();
+        ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_setup_pse_apdus.yaml").unwrap();
 
         let applications = connection.handle_select_payment_system_environment().unwrap();
 
         // Setup the app ICC data
-        execute_setup_apdus(&mut connection, "../config/card_setup_app_apdus.yaml").unwrap();
+        ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_setup_app_apdus.yaml").unwrap();
 
         let application = &applications[0];
         connection.handle_select_payment_application(application).unwrap();
@@ -150,6 +151,9 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
 
         // enciphered PIN OK
         connection.handle_generate_ac().unwrap();
+
+        // Consume logs that the card gathered
+        ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_log_consume_apdus.yaml").unwrap();
     }
 }
 

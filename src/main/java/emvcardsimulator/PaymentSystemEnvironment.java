@@ -41,12 +41,12 @@ public class PaymentSystemEnvironment extends EmvApplet {
                 EmvTag.setTag((short) 0x6F, tmpBuffer, (short) 0, (byte) length);
                 sendResponse(apdu, buf, (short) 0x6F);
             } else {
-                ISOException.throwIt(ISO7816.SW_APPLET_SELECT_FAILED);
+                EmvApplet.logAndThrow(ISO7816.SW_APPLET_SELECT_FAILED);
             }
 
         } else {
             // NO PAN, we're probably in the setup phase
-            ISOException.throwIt(ISO7816.SW_NO_ERROR);
+            EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
         }
     }
 
@@ -55,7 +55,7 @@ public class PaymentSystemEnvironment extends EmvApplet {
 
         ReadRecord readRecord = ReadRecord.findRecord(p1p2);
         if (readRecord == null) {
-            ISOException.throwIt(ISO7816.SW_RECORD_NOT_FOUND);
+            EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
         }
 
         short tag70Length = readRecord.copyDataToArray(tmpBuffer, (short) 0);
@@ -63,7 +63,7 @@ public class PaymentSystemEnvironment extends EmvApplet {
         EmvTag tag = EmvTag.setTag((short) 0x0070, tmpBuffer, (short) 0, (byte) tag70Length);
 
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x00 && buf[ISO7816.OFFSET_LC] != tag.getLength()) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+            EmvApplet.logAndThrow(ISO7816.SW_WRONG_LENGTH);
         }
 
         sendResponse(apdu, buf, (short) 0x0070);
@@ -75,24 +75,32 @@ public class PaymentSystemEnvironment extends EmvApplet {
     public void process(APDU apdu) {
         byte[] buf = apdu.getBuffer(); 
 
+        ApduLog.addLogEntry(buf, (short) 0, (byte) (buf[ISO7816.OFFSET_LC] + 5));
+
         short cmd = Util.getShort(buf, ISO7816.OFFSET_CLA);
 
         switch (cmd) {
             case CMD_SELECT:
                 processSelect(apdu, buf);
-                break;
+                return;
             case CMD_SET_EMV_TAG:
                 processSetEmvTag(apdu, buf);
-                break;
+                return;
+            case CMD_SET_EMV_TAG_FUZZ:
+                processSetEmvTagFuzz(apdu, buf);
+                return;
             case CMD_SET_TAG_TEMPLATE:
                 processSetTagTemplate(apdu, buf);
-                break;
+                return;
             case CMD_SET_READ_RECORD_TEMPLATE:
                 processSetReadRecordTemplate(apdu, buf);
-                break;
+                return;
             case CMD_FACTORY_RESET:
                 factoryReset(apdu, buf);
-                break;
+                return;
+            case CMD_LOG_CONSUME:
+                consumeLogs(apdu, buf);
+                return;
             default:
                 break;
         }
@@ -106,7 +114,7 @@ public class PaymentSystemEnvironment extends EmvApplet {
                 processReadRecord(apdu, buf);
                 break;
             default:
-                ISOException.throwIt(ISO7816.SW_INS_NOT_SUPPORTED);
+                EmvApplet.logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
         }
     }
 }
