@@ -35,6 +35,8 @@ terminal:
     issuer_authentication_failed: false
     script_processing_failed_before_final_generate_ac: false
     script_processing_failed_after_final_generate_ac : false
+  cryptogram_type: 'AuthorisationRequestCryptogram'
+  cryptogram_type_arqc: 'TransactionCertificate'
 default_tags:
   '9F02': '000000000001'
   '9F03': '000000000000'
@@ -43,3 +45,4 @@ default_tags:
   '9C': '21'
   '9F35': '23'
   '9F45': '0000'
+  '91': '00000000000000000000'

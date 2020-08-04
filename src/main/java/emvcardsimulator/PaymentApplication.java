@@ -135,16 +135,27 @@ public class PaymentApplication extends EmvApplet {
     }
 
     private void processGenerateAc(APDU apdu, byte[] buf) {
-        if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x4000) {
-            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+        byte referenceControlParameter = buf[ISO7816.OFFSET_P1];
+        byte requestCryptogramType = (byte) ((short) (referenceControlParameter >> ((byte) 6)) << ((byte) 6));
+
+        byte responseCryptogramType = (byte) 0x40;
+        switch (requestCryptogramType) {
+            case (byte) 0x40: // TC
+                responseCryptogramType = requestCryptogramType;
+                break;
+            case (byte) 0x80: // ARQC
+                responseCryptogramType = requestCryptogramType;
+                break;
+            case (byte) 0x00: // AAC
+                responseCryptogramType = (byte) 0x00;
+                break;
+            default:
+                EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+                break;
         }
 
-        if (buf[ISO7816.OFFSET_LC] != (byte) 0x1D) {
-            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
-        }
-
-        // TODO: check the query
-        // (byte) 0x80, (byte) 0xAE, (byte) 0x40, (byte) 0x00, (byte) 0x1D, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x01, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x02, (byte) 0x46, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0x09, (byte) 0x78, (byte) 0x20, (byte) 0x07, (byte) 0x24, (byte) 0x21, (byte) 0x01, (byte) 0x23, (byte) 0x45, (byte) 0x67, (byte) 0x00
+        tmpBuffer[0] = responseCryptogramType;
+        EmvTag.setTag((short) 0x9F27, tmpBuffer, (short) 0, (byte) 1);
 
         incrementApplicationTransactionCounter();
 

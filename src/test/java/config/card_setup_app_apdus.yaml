@@ -41,6 +41,11 @@
 - req: 'E0 03 02 1C 0A 9F 42 9F 44 9F 08 00 8C 00 8D'
   res: '90 00'
 # Setup ICC EMV tags
+# Fuzz random data to tag 77
+#- req: 'E0 01 00 77 01 00'
+#  res: '90 00'
+#- req: 'E0 11 00 77 04 00 20 00 00'
+#  res: '90 00'
 - req: 'E0 01 9F 36 02 00 F0'
   res: '90 00'
 - req: 'E0 01 00 84 07 AF FF FF FF FF 12 34'
