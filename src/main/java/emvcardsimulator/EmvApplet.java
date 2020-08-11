@@ -47,6 +47,7 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0xE003;
     protected static final short CMD_FACTORY_RESET             = (short) 0xE005;
     protected static final short CMD_LOG_CONSUME               = (short) 0xE006;
+    protected static final short CMD_FUZZ_RESET                = (short) 0xE007;
     protected static final short CMD_SELECT = (short) 0x00A4;
     protected static final short CMD_READ_RECORD = (short) 0x00B2;
     protected static final short CMD_DDA = (short) 0x0088;
@@ -55,6 +56,7 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_GET_DATA = (short) 0x80CA;
     protected static final short CMD_GET_PROCESSING_OPTIONS = (short) 0x80A8;
     protected static final short CMD_GENERATE_AC = (short) 0x80AE;
+    protected static final short CMD_EXTERNAL_AUTHENTICATE = (short) 0x0082;
 
     public static RandomData randomData;
     public static byte[] tmpBuffer;
@@ -73,6 +75,8 @@ public abstract class EmvApplet extends Applet {
     protected TagTemplate tag6fFci;
     protected TagTemplate tagA5Fci;
     protected TagTemplate tagBf0cFci;
+
+    protected byte[] defaultReadRecord;
 
 
     protected short responseTemplateTag;
@@ -99,6 +103,27 @@ public abstract class EmvApplet extends Applet {
         ApduLog.clear();
         ReadRecord.clear();
         EmvTag.clear();
+    }
+
+    protected void fuzzReset(APDU apdu, byte[] buf) {
+        if (Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0000) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        fuzzReset();
+
+        ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    protected void fuzzReset() {
+        JCSystem.beginTransaction();
+
+        randomResponseSuffixData = false;
+        defaultReadRecord = null;
+
+        JCSystem.commitTransaction();
+
+        EmvTag.clearFuzz();
     }
 
     protected void consumeLogs(APDU apdu, byte[] buf) {
@@ -251,7 +276,14 @@ public abstract class EmvApplet extends Applet {
 
         ReadRecord readRecord = ReadRecord.findRecord(p1p2);
         if (readRecord == null) {
-            EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
+            if (defaultReadRecord != null) {
+                short p1p2Fallback = Util.getShort(defaultReadRecord, (short) 0);
+                readRecord = ReadRecord.findRecord(p1p2Fallback);
+            }
+
+            if (readRecord == null) {
+                EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
+            }
         }
 
         short tag70Length = readRecord.expandTlvToArray(tmpBuffer, (short) 0);

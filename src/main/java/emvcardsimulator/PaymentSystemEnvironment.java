@@ -19,6 +19,23 @@ public class PaymentSystemEnvironment extends EmvApplet {
         (new PaymentSystemEnvironment()).register();
     }
 
+    private void processSetSettings(APDU apdu, byte[] buf) {
+        short settingsId = Util.getShort(buf, ISO7816.OFFSET_P1);
+        switch (settingsId) {
+            // FALLBACK READ RECORD
+            case 0x0006:
+                short dataLength = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
+                defaultReadRecord = null;
+                defaultReadRecord = new byte[dataLength];
+                Util.arrayCopy(buf, (short) ISO7816.OFFSET_CDATA, defaultReadRecord, (short) 0, dataLength);
+                break;
+            default:
+                ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
     public PaymentSystemEnvironment() {
         super();
     }
@@ -55,7 +72,14 @@ public class PaymentSystemEnvironment extends EmvApplet {
 
         ReadRecord readRecord = ReadRecord.findRecord(p1p2);
         if (readRecord == null) {
-            EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
+            if (defaultReadRecord != null) {
+                short p1p2Fallback = Util.getShort(defaultReadRecord, (short) 0);
+                readRecord = ReadRecord.findRecord(p1p2Fallback);
+            }
+
+            if (readRecord == null) {
+                EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
+            }
         }
 
         short tag70Length = readRecord.copyDataToArray(tmpBuffer, (short) 0);
@@ -83,6 +107,9 @@ public class PaymentSystemEnvironment extends EmvApplet {
             case CMD_SELECT:
                 processSelect(apdu, buf);
                 return;
+            case CMD_SET_SETTINGS:
+                processSetSettings(apdu, buf);
+                return;
             case CMD_SET_EMV_TAG:
                 processSetEmvTag(apdu, buf);
                 return;
@@ -97,6 +124,9 @@ public class PaymentSystemEnvironment extends EmvApplet {
                 return;
             case CMD_FACTORY_RESET:
                 factoryReset(apdu, buf);
+                return;
+            case CMD_FUZZ_RESET:
+                fuzzReset(apdu, buf);
                 return;
             case CMD_LOG_CONSUME:
                 consumeLogs(apdu, buf);

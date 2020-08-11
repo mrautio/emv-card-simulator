@@ -77,6 +77,13 @@ public class PaymentApplication extends EmvApplet {
             case 0x0005:
                 rsaPrivateKey.setExponent(buf, (short) ISO7816.OFFSET_CDATA, (short) (buf[ISO7816.OFFSET_LC] & 0x00FF));
                 break;
+            // FALLBACK READ RECORD
+            case 0x0006:
+                short dataLength = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
+                defaultReadRecord = null;
+                defaultReadRecord = new byte[dataLength];
+                Util.arrayCopy(buf, (short) ISO7816.OFFSET_CDATA, defaultReadRecord, (short) 0, dataLength);
+                break;
             default:
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
@@ -162,6 +169,21 @@ public class PaymentApplication extends EmvApplet {
         sendResponseTemplate(apdu, buf, responseTemplateGenerateAc);
     }
 
+    private void externalAuthenticate(APDU apdu, byte[] buf) {
+        if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x00) {
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        byte length = buf[ISO7816.OFFSET_LC];
+        if (length < (byte) 8 || length > (byte) 16) {
+            EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
+        }
+
+        // 6300 = Issuer authentication failed
+
+        EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
+    }
+
     private void processGetData(APDU apdu, byte[] buf) {
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x05) {
             EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
@@ -173,7 +195,6 @@ public class PaymentApplication extends EmvApplet {
     private void processGetProcessingOptions(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x00) {
             EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
-
         }
         if (buf[ISO7816.OFFSET_LC] != (byte) 0x02) {
             EmvApplet.logAndThrow(ISO7816.SW_DATA_INVALID);
@@ -318,7 +339,7 @@ public class PaymentApplication extends EmvApplet {
                 return;
             case CMD_SET_SETTINGS:
                 processSetSettings(apdu, buf);
-                return;            
+                return;
             case CMD_SET_EMV_TAG:
                 processSetEmvTag(apdu, buf);
                 return;
@@ -333,6 +354,9 @@ public class PaymentApplication extends EmvApplet {
                 return;
             case CMD_FACTORY_RESET:
                 factoryReset(apdu, buf);
+                return;
+            case CMD_FUZZ_RESET:
+                fuzzReset(apdu, buf);
                 return;
             case CMD_LOG_CONSUME:
                 consumeLogs(apdu, buf);
@@ -366,6 +390,9 @@ public class PaymentApplication extends EmvApplet {
                 break;
             case CMD_GENERATE_AC:
                 processGenerateAc(apdu, buf);
+                break;
+            case CMD_EXTERNAL_AUTHENTICATE:
+                externalAuthenticate(apdu, buf);
                 break;
             default:
                 EmvApplet.logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);

@@ -93,6 +93,18 @@ public class EmvTag {
     }
 
     /**
+     * Clear all fuzz settings.
+     */
+    public static void clearFuzz() {
+        for (EmvTag iter = EmvTag.head; iter != null; iter = iter.next) {            
+            iter.fuzzOffset      = (byte) 0x00;
+            iter.fuzzLength      = (byte) 0x00;
+            iter.fuzzFlags       = (byte) 0x00;
+            iter.fuzzOccurrence  = (byte) 0x00;
+        }
+    }
+
+    /**
      * Remove tag.
      */
     public static boolean removeTag(short tagId) {
