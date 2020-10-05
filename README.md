@@ -1,3 +1,5 @@
+![Build and test](https://github.com/mrautio/emv-card-simulator/workflows/Docker%20Image%20CI/badge.svg)
+
 # emv-card-simulator
 
 JavaCard implementation of an EMV card for payment terminal testing.
