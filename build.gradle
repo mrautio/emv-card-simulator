@@ -167,7 +167,7 @@ task deployPse(type: Exec) {
     group "JavaCard"
     description "Deploy PaymentSystemEnvironment applet to JavaCard"
 
-    commandLine 'java', '-jar', 'gp.jar', '--install', 'build/pse.cap'
+    commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/pse.cap'
 }
 
 task deployPaymentApp(type: Exec) {
@@ -175,5 +175,5 @@ task deployPaymentApp(type: Exec) {
     group "JavaCard"
     description "Deploy payment application applet to JavaCard"
 
-    commandLine 'java', '-jar', 'gp.jar', '--install', 'build/paymentapp.cap'
+    commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/paymentapp.cap'
 }
