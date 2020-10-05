@@ -18,3 +18,17 @@ jobs:
         submodules: true
     - name: Build and test
       run: docker build -t emvcard-builder -f Dockerfile .
+    - name: Copy PSE from build container
+      run: docker run --rm -t emvcard-builder cat /tmp/build/pse.cap > pse.cap
+    - name: Copy Paymentapp from build container
+      run: docker run --rm -t emvcard-builder cat /tmp/build/paymentapp.cap > paymentapp.cap
+    - name: Upload Paymentapp artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: paymentapp.cap
+        path: paymentapp.cap
+    - name: Upload PSE artifact
+      uses: actions/upload-artifact@v1
+      with:
+        name: pse.cap
+        path: pse.cap
