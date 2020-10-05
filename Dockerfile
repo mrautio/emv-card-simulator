@@ -11,6 +11,8 @@ COPY build.gradle ./
 COPY config ./config
 COPY gradle ./gradle
 COPY src ./src
-RUN gradle --no-daemon --console=verbose assemble cap --info
+RUN gradle -Pjc_version=305u3 --console=verbose clean cap --info && tar cvzf /tmp/javacard_305_build.tar.gz --directory=/tmp/build pse.cap paymentapp.cap
+RUN gradle -Pjc_version=304   --console=verbose clean cap --info && tar cvzf /tmp/javacard_304_build.tar.gz --directory=/tmp/build pse.cap paymentapp.cap
+RUN gradle -Pjc_version=222   --console=verbose clean cap --info && tar cvzf /tmp/javacard_222_build.tar.gz --directory=/tmp/build pse.cap paymentapp.cap
 
 CMD exit

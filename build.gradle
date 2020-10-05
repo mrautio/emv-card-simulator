@@ -15,6 +15,17 @@ plugins {
 
 apply plugin: 'java'
 
+// set default properties
+if (!project.hasProperty("jc_version")) {
+    ext.jc_version = "305u3"
+}
+if (!project.hasProperty("paymentapp_cap_aid")) {
+    ext.paymentapp_cap_aid = "AFFFFFFFFF0000"
+}
+if (!project.hasProperty("paymentapp_applet_aid")) {
+    ext.paymentapp_applet_aid = "AFFFFFFFFF1234"
+}
+
 task buildSimulatorLibrary(type: Exec) {
     group "Build"
     description "Build Rust simulator library"
@@ -84,13 +95,28 @@ compileJava {
             '-Xlint:-deprecation', // Some Java Card features are deprecated in 3.0.5 but we target earlier versions
             '-Werror'
     ]
-    // // JavaCard 3.0.5 supports Java 1.7 class files (class version 51)
-    // // JavaCard 3.0.3-3.0.4 supports Java 1.6 class files (class version 50)
-    // // JavaCard 2.2.2 supports Java 1.5 class files (class version 49)
-    // sourceCompatibility = 1.6
-    // targetCompatibility = 1.6
-    sourceCompatibility = 1.7
-    targetCompatibility = 1.7
+
+    if (jc_version.startsWith("305u")) {
+        // class major version 51
+        sourceCompatibility = 1.7
+        targetCompatibility = 1.7
+    } else if (jc_version == "304" || jc_version == "303") {
+        // class major version 50
+        sourceCompatibility = 1.6
+        targetCompatibility = 1.6
+    } else if (jc_version == "222") {
+        // class major version 49
+        sourceCompatibility = 1.5
+        targetCompatibility = 1.5
+    } else {
+        throw new GradleException("JavaCard SDK version not recognized: ${jc_version}")
+    }
+
+    // in case need to target for very old Java class major version
+    if (project.hasProperty("compile_javac_path")) {
+        options.fork = true
+        options.forkOptions.executable = "${compile_javac_path}"
+    }
 }
 
 compileTestJava {
@@ -134,7 +160,7 @@ task cap {
         ant.taskdef(name: 'javacard', classname: 'pro.javacard.ant.JavaCard', classpath: configurations.javacardAntTask.asPath)
 
         // 1PAY.SYS.DDF01
-        ant.javacard(jckit: 'oracle_javacard_sdks/jc305u3_kit') {
+        ant.javacard(jckit: "oracle_javacard_sdks/jc${jc_version}_kit") {
             cap (
                 package: 'emvcardsimulator',
                 version: '0.1',
@@ -147,7 +173,7 @@ task cap {
             }
         }
 
-        ant.javacard(jckit: 'oracle_javacard_sdks/jc305u3_kit') {
+        ant.javacard(jckit: "oracle_javacard_sdks/jc${jc_version}_kit") {
             cap (
                 package: 'emvcardsimulator',
                 version: '0.1',
@@ -155,8 +181,8 @@ task cap {
                 jca: 'build/paymentapp.jca',
                 export: 'build',
                 classes: "build/classes/java/main",
-                aid: 'AFFFFFFFFF0000') {
-                    applet (class: 'emvcardsimulator.PaymentApplication', aid: 'AFFFFFFFFF1234')
+                aid: paymentapp_cap_aid) {
+                    applet (class: 'emvcardsimulator.PaymentApplication', aid: paymentapp_applet_aid)
             }
         }
     }
