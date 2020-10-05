@@ -11,6 +11,6 @@ COPY build.gradle ./
 COPY config ./config
 COPY gradle ./gradle
 COPY src ./src
-RUN gradle --no-daemon --console=verbose build cap --info
+RUN gradle --no-daemon --console=verbose assemble cap --info
 
 CMD exit
