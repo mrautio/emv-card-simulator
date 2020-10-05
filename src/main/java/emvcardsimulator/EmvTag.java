@@ -187,20 +187,20 @@ public class EmvTag {
 
         if (tag[0] == (byte) 0x00) {
             Util.arrayCopy(tag, (short) 1, dst, dstOffset, (short) 1);
-            copyOffset += 1;
+            copyOffset += (short) 1;
         } else {
             Util.arrayCopy(tag, (short) 0, dst, dstOffset, (short) 2);
-            copyOffset += 2;
+            copyOffset += (short) 2;
         }
 
         short shortLength = (short) (length & 0x00FF);
         if (shortLength >= 128) {
             dst[copyOffset] = (byte) 0x81;
-            copyOffset += 1;
+            copyOffset += (short) 1;
         }
 
         short lengthOffset = copyOffset;
-        copyOffset += 1;
+        copyOffset += (short) 1;
         copyOffset = copyDataToArray(dst, copyOffset);
 
         dst[lengthOffset] = length;

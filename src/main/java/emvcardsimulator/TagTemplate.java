@@ -46,7 +46,7 @@ public class TagTemplate {
     public short expandTlvToArray(byte[] dst, short dstOffset) {
 
         short dataOffset = dstOffset;
-        for (short i = 0; i < (short) (this.length & 0x00FF); i += 2) {
+        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += (short) 2) {
             short tagId = Util.getShort(data, i);
 
             EmvTag tag = EmvTag.findTag(tagId);
@@ -67,7 +67,7 @@ public class TagTemplate {
     public short expandTagDataToArray(byte[] dst, short dstOffset) {
 
         short dataOffset = dstOffset;
-        for (short i = 0; i < (short) (this.length & 0x00FF); i += 2) {
+        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += (short) 2) {
             short tagId = Util.getShort(data, i);
 
             EmvTag tag = EmvTag.findTag(tagId);

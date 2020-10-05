@@ -134,7 +134,7 @@ public class PaymentApplication extends EmvApplet {
         EmvTag atcTag = EmvTag.findTag(applicationTransactionCounterTagId);
         if (atcTag != null) {
             short applicationTransactionCounter = Util.getShort(atcTag.getData(), (short) 0);
-            applicationTransactionCounter += 1;
+            applicationTransactionCounter += (short) 1;
 
             Util.setShort(tmpBuffer, (short) 0, applicationTransactionCounter);
             atcTag.setData(tmpBuffer, (short) 0, (byte) 2);
