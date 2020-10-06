@@ -19,23 +19,23 @@ jobs:
     - name: Build and test
       run: docker build -t emvcard-builder -f Dockerfile .
     - name: Copy JavaCard SDK 3.0.5 build
-      run: docker run --rm -t emvcard-builder cat /tmp/javacard_305_build.tar.gz > javacard_305_build.tar.gz
-    - name: Copy JavaCard SDK 3.0.4 build
-      run: docker run --rm -t emvcard-builder cat /tmp/javacard_304_build.tar.gz > javacard_304_build.tar.gz
-    - name: Copy JavaCard SDK 2.2.2 build
-      run: docker run --rm -t emvcard-builder cat /tmp/javacard_222_build.tar.gz > javacard_222_build.tar.gz
+      run: docker run --rm emvcard-builder cat /tmp/javacard_305_build.tar.gz > javacard_build.tar.gz && tar xvzf javacard_build.tar.gz
     - name: Upload JavaCard SDK 3.0.5 build artifact
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v2
       with:
-        name: javacard_305_build.tar.gz
-        path: javacard_305_build.tar.gz
+        name: javacard-305-build
+        path: *.cap
+    - name: Copy JavaCard SDK 3.0.4 build
+      run: docker run --rm emvcard-builder cat /tmp/javacard_304_build.tar.gz > javacard_build.tar.gz && tar xvzf javacard_build.tar.gz
     - name: Upload JavaCard SDK 3.0.4 build artifact
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v2
       with:
-        name: javacard_304_build.tar.gz
-        path: javacard_304_build.tar.gz
+        name: javacard-304-build
+        path: *.cap
+    - name: Copy JavaCard SDK 2.2.2 build
+      run: docker run --rm emvcard-builder cat /tmp/javacard_222_build.tar.gz > javacard_build.tar.gz && tar xvzf javacard_build.tar.gz
     - name: Upload JavaCard SDK 2.2.2 build artifact
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v2
       with:
-        name: javacard_222_build.tar.gz
-        path: javacard_222_build.tar.gz
+        name: javacard-222-build
+        path: *.cap
