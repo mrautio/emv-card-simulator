@@ -17,7 +17,7 @@ apply plugin: 'java'
 
 // set default properties
 if (!project.hasProperty("jc_version")) {
-    ext.jc_version = "305u3"
+    ext.jc_version = "3.0.5"
 }
 if (!project.hasProperty("paymentapp_cap_aid")) {
     ext.paymentapp_cap_aid = "AFFFFFFFFF0000"
@@ -25,6 +25,36 @@ if (!project.hasProperty("paymentapp_cap_aid")) {
 if (!project.hasProperty("paymentapp_applet_aid")) {
     ext.paymentapp_applet_aid = "AFFFFFFFFF1234"
 }
+
+// 3.1.0 targeting does not work
+/*if (jc_version == "3.1.0") {
+    // class major version 51
+    ext.java_version_compatible = 1.7
+    ext.jc_sdk = "jc310b43_kit"
+} else*/ if (jc_version == "3.0.5") {
+    // class major version 51
+    ext.java_version_compatible = 1.7
+    ext.jc_sdk = "jc305u3_kit"
+} else if (jc_version == "3.0.4") {
+    // class major version 50
+    ext.java_version_compatible = 1.6
+    ext.jc_sdk = "jc304_kit"
+} else if (jc_version == "3.0.1") {
+    // class major version 50
+    ext.java_version_compatible = 1.6
+    ext.jc_sdk = "jc303_kit"
+} else if (jc_version == "2.2.2") {
+    // class major version 49
+    ext.java_version_compatible = 1.5
+    ext.jc_sdk = "jc222_kit"
+} else if (jc_version == "2.2.1") {
+    // class major version 46
+    ext.java_version_compatible = 1.2
+    ext.jc_sdk = "jc221_kit"
+} else {
+    throw new GradleException("JavaCard version not recognized: ${jc_version}")
+}
+
 
 task buildSimulatorLibrary(type: Exec) {
     group "Build"
@@ -96,21 +126,8 @@ compileJava {
             '-Werror'
     ]
 
-    if (jc_version.startsWith("305u")) {
-        // class major version 51
-        sourceCompatibility = 1.7
-        targetCompatibility = 1.7
-    } else if (jc_version == "304" || jc_version == "303") {
-        // class major version 50
-        sourceCompatibility = 1.6
-        targetCompatibility = 1.6
-    } else if (jc_version == "222") {
-        // class major version 49
-        sourceCompatibility = 1.5
-        targetCompatibility = 1.5
-    } else {
-        throw new GradleException("JavaCard SDK version not recognized: ${jc_version}")
-    }
+    sourceCompatibility = java_version_compatible
+    targetCompatibility = java_version_compatible
 
     // in case need to target for very old Java class major version
     if (project.hasProperty("compile_javac_path")) {
@@ -160,7 +177,7 @@ task cap {
         ant.taskdef(name: 'javacard', classname: 'pro.javacard.ant.JavaCard', classpath: configurations.javacardAntTask.asPath)
 
         // 1PAY.SYS.DDF01
-        ant.javacard(jckit: "oracle_javacard_sdks/jc${jc_version}_kit") {
+        ant.javacard(jckit: "oracle_javacard_sdks/${jc_sdk}") {
             cap (
                 package: 'emvcardsimulator',
                 version: '0.1',
@@ -173,7 +190,7 @@ task cap {
             }
         }
 
-        ant.javacard(jckit: "oracle_javacard_sdks/jc${jc_version}_kit") {
+        ant.javacard(jckit: "oracle_javacard_sdks/${jc_sdk}") {
             cap (
                 package: 'emvcardsimulator',
                 version: '0.1',

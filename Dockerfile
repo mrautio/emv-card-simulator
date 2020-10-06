@@ -1,3 +1,4 @@
+# JDK8 is best supported by different JavaCard versions
 FROM gradle:jdk8
 
 WORKDIR /tmp
@@ -11,8 +12,12 @@ COPY build.gradle ./
 COPY config ./config
 COPY gradle ./gradle
 COPY src ./src
-RUN gradle -Pjc_version=305u3 --console=verbose clean cap --info && tar cvzf /tmp/javacard_305_build.tar.gz --directory=/tmp/build pse.cap paymentapp.cap
-RUN gradle -Pjc_version=304   --console=verbose clean cap --info && tar cvzf /tmp/javacard_304_build.tar.gz --directory=/tmp/build pse.cap paymentapp.cap
-RUN gradle -Pjc_version=222   --console=verbose clean cap --info && tar cvzf /tmp/javacard_222_build.tar.gz --directory=/tmp/build pse.cap paymentapp.cap
+
+RUN    gradle -Pjc_version=3.0.5 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_5 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_5/ \
+    && gradle -Pjc_version=3.0.4 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_4 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_4/ \
+    && gradle -Pjc_version=3.0.1 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_1 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_1/ \
+    && gradle -Pjc_version=2.2.2 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/2_2_2 && mv /tmp/build/*.cap /tmp/javacard_build/2_2_2/ \
+    && gradle -Pjc_version=2.2.1 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/2_2_1 && mv /tmp/build/*.cap /tmp/javacard_build/2_2_1/ \
+    && tar cvzf javacard_build.tar.gz javacard_build
 
 CMD exit
