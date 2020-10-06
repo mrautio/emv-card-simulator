@@ -2,7 +2,7 @@
 
 # emv-card-simulator
 
-JavaCard implementation of an EMV card for payment terminal testing.
+JavaCard implementation of an EMV card for payment terminal functional and security testing.
 
 ## Building
 
