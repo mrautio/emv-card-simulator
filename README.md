@@ -17,7 +17,7 @@ git clone --recurse-submodules https://github.com/mrautio/emv-card-simulator.git
 If you don't want to install Java/Gradle, you may use Docker:
 
 ```sh
-docker build -t emvcard-builder -f Dockerfile . && docker run -t emvcard-builder
+docker build -t emvcard-builder -f Dockerfile .
 ```
 
 ### Gradle build
@@ -32,6 +32,8 @@ gradle build
 
 ```sh
 gradle dependencies --write-locks
+src/test/rust/simulator> cargo update
+src/main/rust/cardtool> cargo update
 ```
 
 ## Deploying to a SmartCard
