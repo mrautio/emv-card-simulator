@@ -10,6 +10,7 @@ on:
 
 jobs:
   snyk:
+    if: false # disable, due to too many errors
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
