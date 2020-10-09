@@ -1,10 +1,20 @@
 name: Snyk Container 
-on: push
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  schedule:
+    - cron: '0 14 1 * *'
+
 jobs:
   snyk:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v2
+      with:
+        submodules: true
     - name: Build a Docker image
       run: docker build -t emvcard-builder .
     - name: Run Snyk to check Docker image for vulnerabilities
