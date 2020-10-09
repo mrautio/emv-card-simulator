@@ -1,4 +1,4 @@
-![Build and test](https://github.com/mrautio/emv-card-simulator/workflows/Docker%20Image%20CI/badge.svg)
+![Build and test](https://github.com/mrautio/emv-card-simulator/workflows/Build%20and%20Test/badge.svg)
 
 # emv-card-simulator
 
