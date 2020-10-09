@@ -1,11 +1,10 @@
-# JDK8 is best supported by different JavaCard versions
-FROM gradle:jdk8
+FROM alpine:latest
 
 WORKDIR /tmp
 
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN apt-get update && apt-get install -y build-essential pkg-config libssl-dev libpcsclite-dev
+# JDK8 is best supported by different JavaCard versions
+RUN apk add --no-cache openjdk8 gcc make pkgconfig pcsc-lite-dev openssl-dev gradle rust cargo && cargo install cargo-audit
+
 COPY oracle_javacard_sdks ./oracle_javacard_sdks
 COPY gradle.properties ./
 COPY build.gradle ./
@@ -14,7 +13,7 @@ COPY gradle ./gradle
 COPY src ./src
 
 # build and test the application
-RUN gradle build
+RUN gradle build auditSimulatorLibrary
 
 # build multiple JavaCard applications for different versions
 RUN    gradle -Pjc_version=3.0.5 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_5 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_5/ \

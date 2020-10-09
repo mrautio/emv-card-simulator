@@ -55,6 +55,13 @@ if (!project.hasProperty("paymentapp_applet_aid")) {
     throw new GradleException("JavaCard version not recognized: ${jc_version}")
 }
 
+task auditSimulatorLibrary(type: Exec) {
+    group "Verification"
+    description "Audit rust dependencies"
+    workingDir 'src/test/rust/simulator'
+
+    commandLine 'cargo', 'audit'
+}
 
 task buildSimulatorLibrary(type: Exec) {
     group "Build"
