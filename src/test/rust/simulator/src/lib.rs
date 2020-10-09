@@ -89,6 +89,31 @@ impl ApduRequestResponse {
     }
 }
 
+fn pin_entry() -> Result<String, ()> {
+    Ok("1234".to_string())
+}
+
+fn start_transaction(connection : &mut EmvConnection) -> Result<(), ()> {
+    // force transaction date as 24.07.2020
+    connection.add_tag("9A", b"\x20\x07\x24".to_vec());
+
+    // force unpreditable number
+    connection.add_tag("9F37", b"\x01\x23\x45\x67".to_vec());
+    connection.settings.terminal.use_random = false;
+
+    Ok(())
+}
+
+fn setup_connection(connection : &mut EmvConnection) -> Result<(), ()> {
+    connection.interface = Some(ApduInterface::Function(java_card_apdu_interface));
+    connection.pse_application_select_callback = None;
+    connection.pin_callback = Some(&pin_entry);
+    connection.amount_callback = None;
+    connection.start_transaction_callback = Some(&start_transaction);
+
+    Ok(())
+}
+
 
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
@@ -110,7 +135,7 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
         CALLBACK = Some(ENV.as_ref().unwrap().new_global_ref(callback).unwrap());
 
         let mut connection = EmvConnection::new().unwrap();
-        connection.interface = Some(ApduInterface::Function(java_card_apdu_interface));
+        setup_connection(&mut connection).unwrap();
 
         // Setup the PSE ICC data
         ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_setup_pse_apdus.yaml").unwrap();
@@ -123,34 +148,22 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
         let application = &applications[0];
         connection.handle_select_payment_application(application).unwrap();
 
+        connection.start_transaction(&application).unwrap();
+
         connection.process_settings().unwrap();
 
         let search_tag = b"\x9f\x36";
         connection.handle_get_data(&search_tag[..]).unwrap();
 
-        let data_authentication = connection.handle_get_processing_options().unwrap();
+        connection.handle_card_verification_methods().unwrap();
 
-        let (issuer_pk_modulus, issuer_pk_exponent) = connection.get_issuer_public_key(application).unwrap();
+        connection.handle_terminal_risk_management().unwrap();
 
-        let tag_9f46_icc_pk_certificate = connection.get_tag_value("9F46").unwrap();
-        let tag_9f47_icc_pk_exponent = connection.get_tag_value("9F47").unwrap();
-        let tag_9f48_icc_pk_remainder = connection.get_tag_value("9F48");
-        let (icc_pk_modulus, icc_pk_exponent) = connection.get_icc_public_key(
-            tag_9f46_icc_pk_certificate, tag_9f47_icc_pk_exponent, tag_9f48_icc_pk_remainder,
-            &issuer_pk_modulus[..], &issuer_pk_exponent[..],
-            &data_authentication[..]).unwrap();
+        connection.handle_terminal_action_analysis().unwrap();
 
-        connection.handle_dynamic_data_authentication(&icc_pk_modulus[..], &icc_pk_exponent[..]).unwrap();
-
-        let ascii_pin = "1234".to_string();
-        connection.handle_verify_plaintext_pin(ascii_pin.as_bytes()).unwrap();
-
-        let icc_pin_pk_modulus = icc_pk_modulus.clone();
-        let icc_pin_pk_exponent = icc_pk_exponent.clone();
-        connection.handle_verify_enciphered_pin(ascii_pin.as_bytes(), &icc_pin_pk_modulus[..], &icc_pin_pk_exponent[..]).unwrap();
-
-        // enciphered PIN OK
-        connection.handle_generate_ac().unwrap();
+        if let CryptogramType::AuthorisationRequestCryptogram = connection.handle_1st_generate_ac().unwrap() {
+            connection.handle_2nd_generate_ac().unwrap();
+        }
 
         // Consume logs that the card gathered
         ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_log_consume_apdus.yaml").unwrap();
