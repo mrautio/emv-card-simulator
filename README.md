@@ -32,6 +32,7 @@ gradle build
 
 ```sh
 gradle dependencies --write-locks
+gradle --write-verification-metadata sha512 help
 src/test/rust/simulator> cargo update
 src/main/rust/cardtool> cargo update
 ```
