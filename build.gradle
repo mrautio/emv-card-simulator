@@ -95,8 +95,11 @@ configurations {
 }
 
 dependencies {
+
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:latest.release'
+
     testImplementation (
-        'org.junit.jupiter:junit-jupiter-engine:latest.release',
+        'org.junit.jupiter:junit-jupiter-api:latest.release',
         'com.klinec:jcardsim:latest.release'
     )
     implementation (

@@ -7,4 +7,5 @@ org.junit.jupiter:junit-jupiter-api:5.7.0
 org.junit.jupiter:junit-jupiter-engine:5.7.0
 org.junit.platform:junit-platform-commons:1.7.0
 org.junit.platform:junit-platform-engine:1.7.0
+org.junit:junit-bom:5.7.0
 org.opentest4j:opentest4j:1.2.0

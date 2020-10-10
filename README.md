@@ -14,7 +14,7 @@ git clone --recurse-submodules https://github.com/mrautio/emv-card-simulator.git
 
 ### Docker build
 
-If you don't want to install Java/Gradle, you may use Docker:
+If you don't want to install Java8/Gradle(>6), you may use Docker:
 
 ```sh
 docker build -t emvcard-builder -f Dockerfile .
