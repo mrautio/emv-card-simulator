@@ -33,8 +33,8 @@ gradle build
 ```sh
 gradle dependencies --write-locks
 gradle --write-verification-metadata sha512 help
-src/test/rust/simulator> cargo update
-src/main/rust/cardtool> cargo update
+src/test/rust/simulator> cargo upgrade && cargo update && cargo audit
+src/main/rust/cardtool> cargo upgrade && cargo update && cargo audit
 ```
 
 ## Deploying to a SmartCard
