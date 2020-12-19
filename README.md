@@ -31,6 +31,7 @@ gradle build
 ## Update dependencies
 
 ```sh
+# NOTE: checkstyle version is fixed in build.gradle
 gradle dependencies --write-locks
 gradle --write-verification-metadata sha512 help
 src/test/rust/simulator> cargo upgrade && cargo update && cargo audit

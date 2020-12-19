@@ -134,7 +134,7 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
 
         CALLBACK = Some(ENV.as_ref().unwrap().new_global_ref(callback).unwrap());
 
-        let mut connection = EmvConnection::new().unwrap();
+        let mut connection = EmvConnection::new("../config/settings.yaml").unwrap();
         setup_connection(&mut connection).unwrap();
 
         // Setup the PSE ICC data

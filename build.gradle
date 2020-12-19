@@ -75,6 +75,11 @@ tasks.withType(Test) {
     systemProperty "java.library.path", "../../rust/simulator/target/debug/"
 }
 
+checkstyle {
+    // Align version with verification-metadata.xml
+    toolVersion '8.27';
+}
+
 checkstyleMain {
     source ='src/main/java'
     maxWarnings = 0

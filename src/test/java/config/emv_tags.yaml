@@ -139,6 +139,9 @@
 '5F2A':
   tag: '5F2A'
   name: 'Transaction Currency Code'
+'93':
+  tag: '93'
+  name: 'Signed Static Application Data'
 '9A':
   tag: '9A'
   name: 'Transaction Date'
@@ -148,6 +151,9 @@
 '9F37':
   tag: '9F37'
   name: 'Unpredictable Number'
+'9F38':
+  tag: '9F38'
+  name: 'Processing Options Data Object List (PDOL)'
 '8A':
   tag: '8A'
   name: 'Authorisation Response Code'
@@ -163,9 +169,15 @@
 '9F36':
   tag: '9F36'
   name: 'Application Transaction Counter (ATC)'
+'9F21':
+  tag: '9F21'
+  name: 'Transaction Time'
 '9F26':
   tag: '9F26'
   name: 'Application Cryptogram (AC)'
+'9F24':
+  tag: '9F24'
+  name: 'PAR Data'
 '9F10':
   tag: '9F10'
   name: 'Issuer Application Data (IAD)'
@@ -199,3 +211,6 @@
 '9F2D':
   tag: '9F2D'
   name: 'Integrated Circuit Card (ICC) PIN Encipherment Public Key Certificate'
+'9F7C':
+  tag: '9F7C'
+  name: 'Customer Exclusive Data'
