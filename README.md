@@ -4,6 +4,8 @@
 
 JavaCard implementation of an EMV card for payment terminal functional and security testing.
 
+If you need a payment terminal simulator for testing, try [emvpt](https://github.com/mrautio/emvpt) project.
+
 ## Building
 
 ### Cloning project

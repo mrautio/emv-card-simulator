@@ -32,21 +32,26 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
     }
 }
 
-
-fn java_card_apdu_interface(apdu : &[u8]) -> Result<Vec<u8>, ()> {
-    trace!("CALLING {:02X?}", apdu);
-
-    let mut output : Vec<u8> = Vec::new();
-
-    unsafe {
-        let request_apdu = ENV.as_ref().unwrap().byte_array_from_slice(apdu).unwrap();
-        ENV.as_ref().unwrap().call_method(CALLBACK.as_ref().unwrap(), "sendApduRequest", "([B)V", &[request_apdu.into()]).unwrap();
-
-        output.extend_from_slice(&APDU_RESPONSE[..]);
-    }
-
-    Ok(output)
+struct JavaSmartCardConnection {
 }
+
+impl ApduInterface for JavaSmartCardConnection {
+    fn send_apdu(&self, apdu : &[u8]) -> Result<Vec<u8>, ()> {
+        trace!("CALLING {:02X?}", apdu);
+
+        let mut output : Vec<u8> = Vec::new();
+
+        unsafe {
+            let request_apdu = ENV.as_ref().unwrap().byte_array_from_slice(apdu).unwrap();
+            ENV.as_ref().unwrap().call_method(CALLBACK.as_ref().unwrap(), "sendApduRequest", "([B)V", &[request_apdu.into()]).unwrap();
+
+            output.extend_from_slice(&APDU_RESPONSE[..]);
+        }
+
+        Ok(output)
+    }
+}
+
 
 fn init_logging() -> Result<(), Box<dyn error::Error>> {
     let stdout: ConsoleAppender = ConsoleAppender::builder().build();
@@ -105,7 +110,7 @@ fn start_transaction(connection : &mut EmvConnection) -> Result<(), ()> {
 }
 
 fn setup_connection(connection : &mut EmvConnection) -> Result<(), ()> {
-    connection.interface = Some(ApduInterface::Function(java_card_apdu_interface));
+    connection.contactless = false;
     connection.pse_application_select_callback = None;
     connection.pin_callback = Some(&pin_entry);
     connection.amount_callback = None;
@@ -135,6 +140,8 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
         CALLBACK = Some(ENV.as_ref().unwrap().new_global_ref(callback).unwrap());
 
         let mut connection = EmvConnection::new("../config/settings.yaml").unwrap();
+        let smart_card_connection = JavaSmartCardConnection { };
+        connection.interface = Some(&smart_card_connection);
         setup_connection(&mut connection).unwrap();
 
         // Setup the PSE ICC data

@@ -37,15 +37,25 @@ terminal:
     default_tdol_used: false
     issuer_authentication_failed: false
     script_processing_failed_before_final_generate_ac: false
-    script_processing_failed_after_final_generate_ac : false
+    script_processing_failed_after_final_generate_ac: false
+  terminal_transaction_qualifiers:
+    mag_stripe_mode_supported: false
+    emv_mode_supported: true
+    emv_contact_chip_supported: true
+    offline_only_reader: false
+    online_pin_supported: false
+    signature_supported: true
+    offline_data_authentication_for_online_authorizations_supported: true
+    online_cryptogram_required: false
+    cvm_required: false
+    contact_chip_offline_pin_supported: true
+    issuer_update_processing_supported: false
+    consumer_device_cvm_supported: false
   cryptogram_type: 'AuthorisationRequestCryptogram'
   cryptogram_type_arqc: 'TransactionCertificate'
 default_tags:
   '9F02': '000000000001'
-  '9F03': '000000000000'
   '9F1A': '0246'
   '5F2A': 0978
   '9C': '21'
   '9F35': '23'
-  '9F45': '0000'
-  '91': '00000000000000000000'
