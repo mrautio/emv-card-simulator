@@ -38,6 +38,13 @@ terminal:
     issuer_authentication_failed: false
     script_processing_failed_before_final_generate_ac: false
     script_processing_failed_after_final_generate_ac: false
+  tsi:
+    offline_data_authentication_was_performed: false
+    cardholder_verification_was_performed: false
+    card_risk_management_was_performed: false
+    issuer_authentication_was_performed: false
+    terminal_risk_management_was_performed: false
+    script_processing_was_performed: false
   terminal_transaction_qualifiers:
     mag_stripe_mode_supported: false
     emv_mode_supported: true

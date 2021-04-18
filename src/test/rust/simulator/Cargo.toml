@@ -8,12 +8,12 @@ edition = "2018"
 
 [dependencies]
 emvpt = { git = "https://github.com/mrautio/emvpt", version = "0.1.0" }
-jni = "0.18.0"
-log = "0.4.13"
+jni = "0.19.0"
+log = "0.4.14"
 log4rs = "1.0.0"
-hex = "0.4.2"
-serde = { version = "1.0.119", features = ["derive"] }
-serde_yaml = "0.8.15"
+hex = "0.4.3"
+serde = { version = "1.0.125", features = ["derive"] }
+serde_yaml = "0.8.17"
 
 [lib]
 crate_type = ["cdylib"]

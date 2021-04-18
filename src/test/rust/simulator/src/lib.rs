@@ -166,6 +166,8 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
 
         connection.handle_terminal_risk_management().unwrap();
 
+        connection.handle_offline_data_authentication().unwrap();
+
         connection.handle_terminal_action_analysis().unwrap();
 
         if let CryptogramType::AuthorisationRequestCryptogram = connection.handle_1st_generate_ac().unwrap() {
