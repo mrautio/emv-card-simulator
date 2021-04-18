@@ -106,6 +106,9 @@ fn start_transaction(connection : &mut EmvConnection) -> Result<(), ()> {
     connection.add_tag("9F37", b"\x01\x23\x45\x67".to_vec());
     connection.settings.terminal.use_random = false;
 
+    // force issuer authentication data
+    connection.add_tag("91", b"\x12\x34\x56\x78\x12\x34\x56\x78".to_vec());
+
     Ok(())
 }
 
@@ -171,6 +174,7 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
         connection.handle_terminal_action_analysis().unwrap();
 
         if let CryptogramType::AuthorisationRequestCryptogram = connection.handle_1st_generate_ac().unwrap() {
+            connection.handle_issuer_authentication_data().unwrap();
             connection.handle_2nd_generate_ac().unwrap();
         }
 
