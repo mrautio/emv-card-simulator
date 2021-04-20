@@ -16,6 +16,7 @@ plugins {
 apply plugin: 'java'
 
 // set default properties
+// override in command line like: gradle deployPaymentApp -Pjc_version=2.2.2 -Ppaymentapp_cap_aid=A000000123456
 if (!project.hasProperty("jc_version")) {
     ext.jc_version = "3.0.5"
 }
@@ -219,6 +220,9 @@ task cap {
         }
     }
 }
+
+// force delete might sometimes be needed?
+// java -jar gp.jar --delete A000000003 --force
 
 task deployPse(type: Exec) {
     dependsOn downloadGp, cap

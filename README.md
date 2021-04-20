@@ -42,8 +42,11 @@ src/main/rust/cardtool> cargo upgrade && cargo update && cargo audit
 
 ## Deploying to a SmartCard
 
-If you have a SmartCard reader and a Global Platform compliant SmartCard, then you can deploy the application to an actual SmartCard:
+If you have a SmartCard reader and a Global Platform compliant SmartCard, then you can deploy the application to an actual SmartCard. Common installation issue is to use incorrect JavaCard SDK version, set correct with jc_version.
 
 ```sh
-gradle smartCardDeploy
+# Deploy payment selection app to a JavaCard 2 SmartCard 
+gradle deployPse -Pjc_version=2.2.2
+# Deploy the payment app to a JavaCard 2 SmartCard 
+gradle deployPaymentApp -Pjc_version=2.2.2
 ```
