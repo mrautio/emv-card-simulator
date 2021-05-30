@@ -1,0 +1,29 @@
+# Select PSE AID
+- req: '00 A4 04 00 0E 31 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
+  res: '90 00'
+# "Factory reset"
+- req: 'E0 05 00 00 00'
+  res: '90 00'
+# Setup tag templates
+- req: 'E0 02 00 06 04 DF 02 DF 47'
+  res: '90 00'
+- req: 'E0 02 00 05 08 00 88 5F 2D 9F 11 BF 0C'
+  res: '90 00'
+- req: 'E0 02 00 04 04 00 84 00 A5'
+  res: '90 00'
+# Setup READ RECORD tag templates
+- req: 'E0 03 01 0C 30 61 2E 4F 07 AF FF FF FF FF 12 34 50 0D 56 45 53 41 20 45 4C 45 43 54 52 4F 4E 9F 12 10 56 45 53 41 20 20 20 20 20 20 20 20 20 20 20 20 87 01 01'
+  res: '90 00'
+# Setup ICC EMV tags
+- req: 'E0 01 DF 02 02 02 46'
+  res: '90 00'
+- req: 'E0 01 DF 47 03 80 01 01'
+  res: '90 00'
+- req: 'E0 01 9F 11 01 01'
+  res: '90 00'
+- req: 'E0 01 5F 2D 02 65 6E'
+  res: '90 00'
+- req: 'E0 01 00 88 01 01'
+  res: '90 00'
+- req: 'E0 01 00 84 0E 31 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
+  res: '90 00'

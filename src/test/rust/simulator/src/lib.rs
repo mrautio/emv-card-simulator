@@ -109,6 +109,9 @@ fn start_transaction(connection : &mut EmvConnection) -> Result<(), ()> {
     // force issuer authentication data
     connection.add_tag("91", b"\x12\x34\x56\x78\x12\x34\x56\x78".to_vec());
 
+    // transaction amount 0,01 EUR
+    connection.add_tag("9F02", b"\x00\x00\x00\x00\x00\x01".to_vec());
+
     Ok(())
 }
 

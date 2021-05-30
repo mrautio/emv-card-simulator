@@ -12,7 +12,7 @@ jni = "0.19.0"
 log = "0.4.14"
 log4rs = "1.0.0"
 hex = "0.4.3"
-serde = { version = "1.0.125", features = ["derive"] }
+serde = { version = "1.0.126", features = ["derive"] }
 serde_yaml = "0.8.17"
 
 [lib]
