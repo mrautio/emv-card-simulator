@@ -27,6 +27,6 @@ jobs:
     - run: gradle dependencies --write-locks
     - run: gradle --write-verification-metadata sha512 help
     - run: cd src/test/rust/simulator && cargo upgrade && cargo update && cargo audit
-    - run: cd src/test/rust/cardtool && cargo upgrade && cargo update && cargo audit
+    - run: cd src/main/rust/cardtool && cargo upgrade && cargo update && cargo audit
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v3
