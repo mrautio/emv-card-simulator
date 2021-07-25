@@ -22,6 +22,7 @@ jobs:
     - uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
+    - run: cargo install cargo-edit cargo-audit
     # NOTE: checkstyle version is fixed in build.gradle
     - run: gradle dependencies --write-locks
     - run: gradle --write-verification-metadata sha512 help
