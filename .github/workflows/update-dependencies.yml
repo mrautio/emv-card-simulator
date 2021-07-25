@@ -33,6 +33,7 @@ jobs:
     - run: gradle -Pjc_version=3.0.5 --console=verbose clean cap --info
     - name: Create Pull Request
       uses: peter-evans/create-pull-request@v3
-      title: Update dependencies
-      commit-message: Update dependencies
-      delete-branch: true
+      with:
+        title: Update dependencies
+        commit-message: Update dependencies
+        delete-branch: true
