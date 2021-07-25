@@ -1,0 +1,32 @@
+name: Update dependencies
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: true
+    - uses: actions/setup-java@v1
+      with:
+        java-version: 8
+    - uses: eskatos/gradle-command-action@v1
+      with:
+        gradle-version: current
+    - uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+    - name: Update dependencies
+    # NOTE: checkstyle version is fixed in build.gradle
+    - run: gradle dependencies --write-locks
+    - run: gradle --write-verification-metadata sha512 help
+    - run: cd src/test/rust/simulator && cargo upgrade && cargo update && cargo audit
+    - run: cd src/test/rust/cardtool && cargo upgrade && cargo update && cargo audit
+    - name: Create Pull Request
+      uses: peter-evans/create-pull-request@v3
