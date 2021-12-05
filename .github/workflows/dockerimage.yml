@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: [ master ]
   # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
+  workflow_dispatch: null
 
 jobs:
 
@@ -15,15 +15,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-      with:
-        submodules: true
-    - name: Build and test
-      run: docker build -t emvcard-builder -f Dockerfile .
-    - name: Copy JavaCard build
-      run: docker run --rm emvcard-builder cat /tmp/javacard_build.tar.gz > javacard_build.tar.gz && tar xvzf javacard_build.tar.gz
-    - name: Upload JavaCard build artifacts
-      uses: actions/upload-artifact@v2
-      with:
-        name: javacard_build
-        path: 'javacard_build'
+      - uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579 # pin@v2
+        with:
+          submodules: true
+      - name: Build and test
+        run: docker build -t emvcard-builder -f Dockerfile .
+      - name: Copy JavaCard build
+        run: docker run --rm emvcard-builder cat /tmp/javacard_build.tar.gz >
+          javacard_build.tar.gz && tar xvzf javacard_build.tar.gz
+      - name: Upload JavaCard build artifacts
+        uses: actions/upload-artifact@27121b0bdffd731efa15d66772be8dc71245d074 # pin@v2
+        with:
+          name: javacard_build
+          path: 'javacard_build'
