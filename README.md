@@ -24,7 +24,7 @@ docker build -t emvcard-builder -f Dockerfile .
 
 ### Gradle build
 
-If you have all developer tools existing, then you can just use Gradle:
+If you have all developer tools existing, or enter to `nix-shell`, then you can just use Gradle:
 
 ```sh
 gradle build

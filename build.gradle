@@ -56,12 +56,21 @@ if (!project.hasProperty("paymentapp_applet_aid")) {
     throw new GradleException("JavaCard version not recognized: ${jc_version}")
 }
 
+// Nix-shell pure environment's gradle does not find cargo somehow
+// working around via bash/cmd call
+ext.cmd_shell = "bash"
+ext.cmd_shell_option = "-c"
+if (System.properties['os.name'].toLowerCase().contains('windows')) {
+    ext.cmd_shell = "cmd"
+    ext.cmd_shell_option = "/c"
+}
+
 task auditSimulatorLibrary(type: Exec) {
     group "Verification"
     description "Audit rust dependencies"
     workingDir 'src/test/rust/simulator'
 
-    commandLine 'cargo', 'audit'
+    commandLine "${cmd_shell}", "${cmd_shell_option}", 'cargo audit'
 }
 
 task buildSimulatorLibrary(type: Exec) {
@@ -69,7 +78,7 @@ task buildSimulatorLibrary(type: Exec) {
     description "Build Rust simulator library"
     workingDir 'src/test/rust/simulator'
 
-    commandLine 'cargo', 'build'
+    commandLine "${cmd_shell}", "${cmd_shell_option}", 'cargo build'
 }
 
 tasks.withType(Test) {
