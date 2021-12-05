@@ -3,7 +3,7 @@ FROM alpine:edge
 WORKDIR /tmp
 
 # JDK8 is best supported by different JavaCard versions
-RUN apk add --no-cache openjdk8 gcc make pkgconfig openssl-dev rust cargo gradle>6.0.0 && cargo install cargo-audit
+RUN apk add --no-cache bash openjdk8 gcc make pkgconfig openssl-dev rust cargo gradle>6.0.0 && cargo install cargo-audit
 
 COPY oracle_javacard_sdks ./oracle_javacard_sdks
 COPY build.gradle gradle.properties ./
@@ -12,7 +12,7 @@ COPY gradle ./gradle
 COPY src ./src
 
 # build and test the application
-RUN gradle build auditSimulatorLibrary \
+RUN gradle build \
 # build multiple JavaCard applications for different versions
     && gradle -Pjc_version=3.0.5 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_5 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_5/ \
     && gradle -Pjc_version=3.0.4 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_4 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_4/ \
