@@ -15,7 +15,8 @@ jobs:
           submodules: true
       - uses: actions/setup-java@a18c333f3f14249953dab3e186e5e21bf3390f1d # pin@3.1.0
         with:
-          java-version: 8
+          distribution: 'corretto'
+          java-version: '8'
       - uses: eskatos/gradle-command-action@fd32ae908111fe31afa48827bd1ee909540aa971 # pin@v2.3.2
         with:
           gradle-version: current
