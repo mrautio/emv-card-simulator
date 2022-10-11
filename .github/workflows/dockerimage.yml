@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579 # pin@v2
+      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # pin@v3.1.0
         with:
           submodules: true
       - name: Build and test
@@ -24,7 +24,7 @@ jobs:
         run: docker run --rm emvcard-builder cat /tmp/javacard_build.tar.gz >
           javacard_build.tar.gz && tar xvzf javacard_build.tar.gz
       - name: Upload JavaCard build artifacts
-        uses: actions/upload-artifact@27121b0bdffd731efa15d66772be8dc71245d074 # pin@v2
+        uses: actions/upload-artifact@3cea5372237819ed00197afe530f5a7ea3e805c8 # pin@v3.1.0
         with:
           name: javacard_build
           path: 'javacard_build'

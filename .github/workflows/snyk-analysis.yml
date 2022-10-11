@@ -15,7 +15,7 @@ jobs:
     #if: false # disable, due to too many errors
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ec3a7ce113134d7a93b817d10a8272cb61118579 # pin@v2
+      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # pin@v3.1.0
         with:
           submodules: true
       - name: Build a Docker image
@@ -24,7 +24,7 @@ jobs:
         # Snyk can be used to break the build when it detects vulnerabilities.
         # In this case we want to upload the issues to GitHub Code Scanning
         continue-on-error: true
-        uses: snyk/actions/docker@14818c4695ecc4045f33c9cee9e795a788711ca4 # pin@master
+        uses: snyk/actions/docker@4259725f0dd662aa764d82760cca8959888a595c # pin@master
         env:
           # In order to use the Snyk Action you will need to have a Snyk API token.
           # More details in https://github.com/snyk/actions#getting-your-snyk-token
