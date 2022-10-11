@@ -23,6 +23,7 @@ jobs:
       - uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # pin@v1.0.6
         with:
           toolchain: stable
+      - run: sudo apt-get install -y libpcsclite-dev
       - run: cargo install cargo-edit
       - run: cd src/test/rust/simulator && cargo upgrade && cargo update && cargo test
       - run: cd src/main/rust/cardtool && cargo upgrade && cargo update && cargo test
