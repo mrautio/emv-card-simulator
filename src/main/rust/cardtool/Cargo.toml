@@ -8,12 +8,12 @@ edition = "2018"
 
 [dependencies]
 emvpt = { git = "https://github.com/mrautio/emvpt", version = "0.1.0" }
-log = "0.4.14"
-log4rs = "1.0.0"
-clap = "2.33.3"
+log = "0.4.17"
+log4rs = "1.2.0"
+clap = "2.34.0"
 hex = "0.4.3"
-serde = { version = "1.0.126", features = ["derive"] }
-serde_yaml = "0.8.17"
-pcsc = "2.5.0"
-regex = "1.5.4"
+serde = { version = "1.0.145", features = ["derive"] }
+serde_yaml = "0.8.26"
+pcsc = "2.7.0"
+regex = "1.6.0"
 
