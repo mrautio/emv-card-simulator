@@ -31,7 +31,7 @@ jobs:
       - run: gradle dependencies --write-locks
       - run: gradle --write-verification-metadata sha512 help
       # dockerimage.yml is not triggered without repo scoped token, doing testing in the task, ref. https://github.com/peter-evans/create-pull-request/issues/48
-      - run: gradle build auditSimulatorLibrary
+      - run: gradle build
       - run: gradle -Pjc_version=3.0.5 --console=verbose clean cap --info
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@671dc9c9e0c2d73f07fa45a3eb0220e1622f0c5f # pin@v4.1.3
