@@ -1,23 +1,23 @@
-use jni::JNIEnv;
+use hex;
 use jni::objects::{GlobalRef, JClass, JObject};
 use jni::sys::jbyteArray;
-use serde::{Deserialize};
-use hex;
-use std::fs::{self};
-use std::error;
+use jni::JNIEnv;
+use log::trace;
+use log::LevelFilter;
 use log4rs;
-use log::{LevelFilter};
-use log::{trace};
 use log4rs::{
     append::console::ConsoleAppender,
-    config::{Appender, Root}
+    config::{Appender, Root},
 };
+use serde::Deserialize;
+use std::error;
+use std::fs::{self};
 
 use emvpt::*;
 
-static mut ENV : Option<JNIEnv<'static>> = None;
-static mut CALLBACK : Option<GlobalRef> = None;
-static mut APDU_RESPONSE : Vec<u8> = Vec::new();
+static mut ENV: Option<JNIEnv<'static>> = None;
+static mut CALLBACK: Option<GlobalRef> = None;
+static mut APDU_RESPONSE: Vec<u8> = Vec::new();
 
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
@@ -32,18 +32,25 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
     }
 }
 
-struct JavaSmartCardConnection {
-}
+struct JavaSmartCardConnection {}
 
 impl ApduInterface for JavaSmartCardConnection {
-    fn send_apdu(&self, apdu : &[u8]) -> Result<Vec<u8>, ()> {
+    fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, ()> {
         trace!("CALLING {:02X?}", apdu);
 
-        let mut output : Vec<u8> = Vec::new();
+        let mut output: Vec<u8> = Vec::new();
 
         unsafe {
             let request_apdu = ENV.as_ref().unwrap().byte_array_from_slice(apdu).unwrap();
-            ENV.as_ref().unwrap().call_method(CALLBACK.as_ref().unwrap(), "sendApduRequest", "([B)V", &[request_apdu.into()]).unwrap();
+            ENV.as_ref()
+                .unwrap()
+                .call_method(
+                    CALLBACK.as_ref().unwrap(),
+                    "sendApduRequest",
+                    "([B)V",
+                    &[request_apdu.into()],
+                )
+                .unwrap();
 
             output.extend_from_slice(&APDU_RESPONSE[..]);
         }
@@ -52,13 +59,12 @@ impl ApduInterface for JavaSmartCardConnection {
     }
 }
 
-
 fn init_logging() -> Result<(), Box<dyn error::Error>> {
     let stdout: ConsoleAppender = ConsoleAppender::builder().build();
     let config = log4rs::config::Config::builder()
         .appender(Appender::builder().build("stdout", Box::new(stdout)))
         .build(Root::builder().appender("stdout").build(LevelFilter::Debug));
-    
+
     if let Err(e) = log4rs::init_config(config.unwrap()) {
         return Err(Box::new(e));
     }
@@ -68,25 +74,30 @@ fn init_logging() -> Result<(), Box<dyn error::Error>> {
 
 #[derive(Deserialize, Clone)]
 struct ApduRequestResponse {
-    req : String,
-    res : String
+    req: String,
+    res: String,
 }
 
 impl ApduRequestResponse {
-    fn to_raw_vec(s : &String) -> Vec<u8> {
+    fn to_raw_vec(s: &String) -> Vec<u8> {
         hex::decode(s.replace(" ", "")).unwrap()
     }
 
-    fn execute_setup_apdus(connection : &mut EmvConnection, setup_file : &str) -> Result<(), String> {
+    fn execute_setup_apdus(connection: &mut EmvConnection, setup_file: &str) -> Result<(), String> {
         // Setup the app ICC data
-        let card_setup_data : Vec<ApduRequestResponse> = serde_yaml::from_str(&fs::read_to_string(setup_file).unwrap()).unwrap();
+        let card_setup_data: Vec<ApduRequestResponse> =
+            serde_yaml::from_str(&fs::read_to_string(setup_file).unwrap()).unwrap();
         for apdu in card_setup_data {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let response = ApduRequestResponse::to_raw_vec(&apdu.res);
 
             let (response_trailer, _) = connection.send_apdu(&request);
             if &response_trailer[..] != &response[..] {
-                return Err(format!("Response not what expected! expected:{:02X?}, actual:{:02X?}", &response[..], &response_trailer[..]));
+                return Err(format!(
+                    "Response not what expected! expected:{:02X?}, actual:{:02X?}",
+                    &response[..],
+                    &response_trailer[..]
+                ));
             }
         }
 
@@ -98,7 +109,7 @@ fn pin_entry() -> Result<String, ()> {
     Ok("1234".to_string())
 }
 
-fn start_transaction(connection : &mut EmvConnection) -> Result<(), ()> {
+fn start_transaction(connection: &mut EmvConnection) -> Result<(), ()> {
     // force transaction date as 24.07.2020
     connection.add_tag("9A", b"\x20\x07\x24".to_vec());
 
@@ -115,7 +126,7 @@ fn start_transaction(connection : &mut EmvConnection) -> Result<(), ()> {
     Ok(())
 }
 
-fn setup_connection(connection : &mut EmvConnection) -> Result<(), ()> {
+fn setup_connection(connection: &mut EmvConnection) -> Result<(), ()> {
     connection.contactless = false;
     connection.pse_application_select_callback = None;
     connection.pin_callback = Some(&pin_entry);
@@ -124,7 +135,6 @@ fn setup_connection(connection : &mut EmvConnection) -> Result<(), ()> {
 
     Ok(())
 }
-
 
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
@@ -139,27 +149,39 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
     unsafe {
         // Setup JVM and callback points to Simulator class
 
-        ENV = Some(env);        
+        ENV = Some(env);
 
         let _jvm = ENV.as_ref().unwrap().get_java_vm().unwrap();
 
         CALLBACK = Some(ENV.as_ref().unwrap().new_global_ref(callback).unwrap());
 
         let mut connection = EmvConnection::new("../config/settings.yaml").unwrap();
-        let smart_card_connection = JavaSmartCardConnection { };
+        let smart_card_connection = JavaSmartCardConnection {};
         connection.interface = Some(&smart_card_connection);
         setup_connection(&mut connection).unwrap();
 
         // Setup the PSE ICC data
-        ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_setup_pse_apdus.yaml").unwrap();
+        ApduRequestResponse::execute_setup_apdus(
+            &mut connection,
+            "../config/card_setup_pse_apdus.yaml",
+        )
+        .unwrap();
 
-        let applications = connection.handle_select_payment_system_environment().unwrap();
+        let applications = connection
+            .handle_select_payment_system_environment()
+            .unwrap();
 
         // Setup the app ICC data
-        ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_setup_app_apdus.yaml").unwrap();
+        ApduRequestResponse::execute_setup_apdus(
+            &mut connection,
+            "../config/card_setup_app_apdus.yaml",
+        )
+        .unwrap();
 
         let application = &applications[0];
-        connection.handle_select_payment_application(application).unwrap();
+        connection
+            .handle_select_payment_application(application)
+            .unwrap();
 
         connection.start_transaction(&application).unwrap();
 
@@ -176,13 +198,19 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
 
         connection.handle_terminal_action_analysis().unwrap();
 
-        if let CryptogramType::AuthorisationRequestCryptogram = connection.handle_1st_generate_ac().unwrap() {
+        if let CryptogramType::AuthorisationRequestCryptogram =
+            connection.handle_1st_generate_ac().unwrap()
+        {
             connection.handle_issuer_authentication_data().unwrap();
             connection.handle_2nd_generate_ac().unwrap();
         }
 
         // Consume logs that the card gathered
-        ApduRequestResponse::execute_setup_apdus(&mut connection, "../config/card_log_consume_apdus.yaml").unwrap();
+        ApduRequestResponse::execute_setup_apdus(
+            &mut connection,
+            "../config/card_log_consume_apdus.yaml",
+        )
+        .unwrap();
     }
 }
 
