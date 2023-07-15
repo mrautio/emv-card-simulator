@@ -13,6 +13,7 @@ pkgs.mkShell {
     pkgs.rustc
     pkgs.cargo
     pkgs.gcc
+    pkgs.pcsclite
   ];
 
   SSL_CERT_FILE = "${pkgs.cacert.out}/etc/ssl/certs/ca-bundle.crt";
