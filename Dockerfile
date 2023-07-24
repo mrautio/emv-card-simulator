@@ -1,9 +1,14 @@
-FROM alpine:edge
+FROM alpine:latest
 
 WORKDIR /tmp
 
-# JDK8 is best supported by different JavaCard versions
-RUN apk add --no-cache bash openjdk8 gcc make pkgconfig openssl-dev rust cargo gradle>6.0.0 && cargo install cargo-audit
+RUN apk add --no-cache bash gcc make pkgconfig openssl-dev rust cargo gradle>6.0.0 openjdk8=8.372.07-r0
+
+# JDK8 is best supported by different JavaCard versions (<=3.0.4)
+ENV JAVA_HOME /usr/lib/jvm/java-1.8-openjdk/
+ENV PATH $PATH:/usr/lib/jvm/java-1.8-openjdk/bin
+ENV JAVA_VERSION 8u372
+ENV JAVA_ALPINE_VERSION 8.372.07-r0
 
 COPY oracle_javacard_sdks ./oracle_javacard_sdks
 COPY build.gradle gradle.properties ./
