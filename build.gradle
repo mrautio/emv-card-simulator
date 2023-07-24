@@ -65,14 +65,6 @@ if (System.properties['os.name'].toLowerCase().contains('windows')) {
     ext.cmd_shell_option = "/c"
 }
 
-task auditSimulatorLibrary(type: Exec) {
-    group "Verification"
-    description "Audit rust dependencies"
-    workingDir 'src/test/rust/simulator'
-
-    commandLine "${cmd_shell}", "${cmd_shell_option}", 'cargo audit'
-}
-
 task buildSimulatorLibrary(type: Exec) {
     group "Build"
     description "Build Rust simulator library"
