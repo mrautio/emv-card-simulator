@@ -94,7 +94,8 @@ impl ApduRequestResponse {
             let (response_trailer, _) = connection.send_apdu(&request);
             if &response_trailer[..] != &response[..] {
                 return Err(format!(
-                    "Response not what expected! expected:{:02X?}, actual:{:02X?}",
+                    "Response not what expected! setup_file:{}, expected:{:02X?}, actual:{:02X?}",
+                    setup_file,
                     &response[..],
                     &response_trailer[..]
                 ));

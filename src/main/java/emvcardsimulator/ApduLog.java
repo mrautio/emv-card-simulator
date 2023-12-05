@@ -50,7 +50,7 @@ public class ApduLog {
             return;
         }
 
-        if (src[srcOffset] == (byte) 0xE0) {
+        if (src[srcOffset] == (byte) 0x80) {
             // do not log internal commands
             return;
         }
