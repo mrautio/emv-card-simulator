@@ -67,7 +67,7 @@ public class SimulatorTest {
         try {
             ResponseAPDU response = SmartCard.transmitCommand(requestApdu);
             sendApduResponse(response.getBytes());
-        } catch (CardException e) {
+        } catch (Exception e) {
             e.printStackTrace();
             throw new RuntimeException(e);
         }
