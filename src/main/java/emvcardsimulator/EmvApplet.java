@@ -40,14 +40,14 @@ public abstract class EmvApplet extends Applet {
     }
     */
 
-    protected static final short CMD_SET_SETTINGS              = (short) 0xE000;
-    protected static final short CMD_SET_EMV_TAG               = (short) 0xE001;
-    protected static final short CMD_SET_EMV_TAG_FUZZ          = (short) 0xE011;
-    protected static final short CMD_SET_TAG_TEMPLATE          = (short) 0xE002;
-    protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0xE003;
-    protected static final short CMD_FACTORY_RESET             = (short) 0xE005;
-    protected static final short CMD_LOG_CONSUME               = (short) 0xE006;
-    protected static final short CMD_FUZZ_RESET                = (short) 0xE007;
+    protected static final short CMD_SET_SETTINGS              = (short) 0x8000;
+    protected static final short CMD_SET_EMV_TAG               = (short) 0x8001;
+    protected static final short CMD_SET_EMV_TAG_FUZZ          = (short) 0x8011;
+    protected static final short CMD_SET_TAG_TEMPLATE          = (short) 0x8002;
+    protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0x8003;
+    protected static final short CMD_FACTORY_RESET             = (short) 0x8005;
+    protected static final short CMD_LOG_CONSUME               = (short) 0x8006;
+    protected static final short CMD_FUZZ_RESET                = (short) 0x8007;
     protected static final short CMD_SELECT = (short) 0x00A4;
     protected static final short CMD_READ_RECORD = (short) 0x00B2;
     protected static final short CMD_DDA = (short) 0x0088;

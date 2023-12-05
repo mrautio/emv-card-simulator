@@ -38,7 +38,7 @@ public class PaymentSystemEnvironmentTest {
         assertEquals(ISO7816.SW_NO_ERROR, (short) response.getSW());
 
         // Reset card setup
-        response = SmartCard.transmitCommand(new byte[] {(byte) 0xE0, (byte) 0x05, (byte) 0x00, (byte) 0x00, (byte) 0x00});
+        response = SmartCard.transmitCommand(new byte[] {(byte) 0x80, (byte) 0x05, (byte) 0x00, (byte) 0x00, (byte) 0x00});
         assertEquals(ISO7816.SW_NO_ERROR, (short) response.getSW());
     }
 
