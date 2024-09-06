@@ -2,9 +2,6 @@ buildscript {
     repositories {
         mavenCentral()
     }
-    configurations.classpath {
-        resolutionStrategy.activateDependencyLocking()
-    }
 }
 
 plugins {
@@ -113,10 +110,6 @@ dependencies {
         'com.klinec:jcardsim:latest.release'
     )
     javacardAntTask 'com.github.martinpaljak:ant-javacard:latest.release'
-}
-
-dependencyLocking {
-    lockAllConfigurations()
 }
 
 test {
