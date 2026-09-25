@@ -12,6 +12,13 @@ plugins {
 
 apply plugin: 'java'
 
+// JavaCard targets need Java 7 (or older) class files, which JDK 9+ javac cannot produce
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+}
+
 // set default properties
 // override in command line like: gradle deployPaymentApp -Pjc_version=2.2.2 -Ppaymentapp_cap_aid=A000000123456
 if (!project.hasProperty("jc_version")) {
@@ -75,8 +82,8 @@ tasks.withType(Test) {
 }
 
 checkstyle {
-    // Align version with verification-metadata.xml
-    toolVersion '8.27';
+    // 9.3 is the last Checkstyle release that runs on Java 8
+    toolVersion '9.3';
 }
 
 checkstyleMain {
@@ -100,10 +107,14 @@ configurations {
 
 dependencies {
 
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:latest.release'
+    // JUnit 6 requires Java 17, stay on JUnit 5 while building on Java 8
+    testRuntimeOnly (
+        'org.junit.jupiter:junit-jupiter-engine:5.+',
+        'org.junit.platform:junit-platform-launcher:1.+'
+    )
 
     testImplementation (
-        'org.junit.jupiter:junit-jupiter-api:latest.release',
+        'org.junit.jupiter:junit-jupiter-api:5.+',
         'com.klinec:jcardsim:latest.release'
     )
     implementation (

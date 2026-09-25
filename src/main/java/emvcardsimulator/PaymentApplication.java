@@ -237,8 +237,20 @@ public class PaymentApplication extends EmvApplet {
 
         // Build Template
 
-        rsaCipher.init(rsaPrivateKey, Cipher.MODE_ENCRYPT);
-        rsaCipher.doFinal(tmpBuffer, (short) 0, signedDataSize, buf, (short) 0);
+        // Raw RSA private key operation (signature). MODE_DECRYPT accepts full modulus length
+        // input, MODE_ENCRYPT only allows modulus length - 1 bytes.
+        // The MODE_ENCRYPT limit is a jcardsim (>= 3.0.6.0) deviation from the JavaCard spec for
+        // ALG_RSA_NOPAD. Fix pending upstream: https://github.com/ph4r05/jcardsim/pull/3
+        // Once merged and released, MODE_ENCRYPT could be used here again.
+        rsaCipher.init(rsaPrivateKey, Cipher.MODE_DECRYPT);
+        short signatureSize = rsaCipher.doFinal(tmpBuffer, (short) 0, signedDataSize, buf, (short) 0);
+
+        // Result may have leading zero bytes stripped, left pad back to modulus length
+        short padSize = (short) (signedDataSize - signatureSize);
+        if (padSize > 0) {
+            Util.arrayCopyNonAtomic(buf, (short) 0, buf, padSize, signatureSize);
+            Util.arrayFillNonAtomic(buf, (short) 0, padSize, (byte) 0x00);
+        }
 
         EmvTag.setTag((short) 0x9F4B, buf, (short) 0, (byte) signedDataSize);
 

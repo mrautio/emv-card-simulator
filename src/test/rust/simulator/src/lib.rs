@@ -1,6 +1,5 @@
 use hex;
-use jni::objects::{GlobalRef, JClass, JObject};
-use jni::sys::jbyteArray;
+use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JValue};
 use jni::JNIEnv;
 use log::trace;
 use log::LevelFilter;
@@ -23,11 +22,11 @@ static mut APDU_RESPONSE: Vec<u8> = Vec::new();
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
     env: JNIEnv,
     _class: JClass,
-    response_apdu: jbyteArray,
+    response_apdu: JByteArray,
 ) {
     unsafe {
         APDU_RESPONSE.clear();
-        APDU_RESPONSE.extend_from_slice(&env.convert_byte_array(response_apdu).unwrap()[..]);
+        APDU_RESPONSE.extend_from_slice(&env.convert_byte_array(&response_apdu).unwrap()[..]);
         trace!("RESPONSE: {:02X?}", APDU_RESPONSE);
     }
 }
@@ -42,13 +41,13 @@ impl ApduInterface for JavaSmartCardConnection {
 
         unsafe {
             let request_apdu = ENV.as_ref().unwrap().byte_array_from_slice(apdu).unwrap();
-            ENV.as_ref()
+            ENV.as_mut()
                 .unwrap()
                 .call_method(
                     CALLBACK.as_ref().unwrap(),
                     "sendApduRequest",
                     "([B)V",
-                    &[request_apdu.into()],
+                    &[JValue::Object(&request_apdu)],
                 )
                 .unwrap();
 
@@ -140,8 +139,8 @@ fn setup_connection(connection: &mut EmvConnection) -> Result<(), ()> {
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
     env: JNIEnv<'static>,
-    _class: JClass,
-    callback: JObject,
+    _class: JClass<'static>,
+    callback: JObject<'static>,
 ) {
     trace!("Simulator entry point called!");
 

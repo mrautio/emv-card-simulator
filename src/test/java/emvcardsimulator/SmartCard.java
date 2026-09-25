@@ -2,15 +2,12 @@ package emvcardsimulator;
 
 import com.licel.jcardsim.smartcardio.CardSimulator;
 import com.licel.jcardsim.utils.AIDUtil;
-
 import java.io.OutputStream;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
-
 import javacard.framework.AID;
 import javacard.framework.Applet;
-
 import javax.smartcardio.Card;
 import javax.smartcardio.CardException;
 import javax.smartcardio.CardTerminals.State;
