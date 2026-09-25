@@ -60,6 +60,7 @@ public abstract class EmvApplet extends Applet {
 
     protected static final short SW_AUTHENTICATION_METHOD_BLOCKED = (short) 0x6983;
     protected static final short SW_REFERENCED_DATA_NOT_FOUND = (short) 0x6A88;
+    protected static final short SW_ISSUER_AUTHENTICATION_FAILED = (short) 0x6300;
 
     public static RandomData randomData;
     public static byte[] tmpBuffer;
@@ -80,6 +81,9 @@ public abstract class EmvApplet extends Applet {
     protected TagTemplate tagBf0cFci;
 
     protected byte[] defaultReadRecord;
+
+    // Length of the data object found by the latest findDataObjectListEntry tag search
+    protected static short dataObjectListEntryLength = 0;
 
 
     protected short responseTemplateTag;
@@ -226,6 +230,7 @@ public abstract class EmvApplet extends Applet {
      * Find a tag from data object list (DOL) stored in EmvTag dolTagId.
      * Returns the offset of the tag value in DOL related data, or -1 if not found.
      * When searchTagId is 0, returns the total length of DOL related data, or -1 if the DOL does not exist.
+     * When the tag is found, its length is stored to dataObjectListEntryLength.
      */
     protected static short findDataObjectListEntry(short dolTagId, short searchTagId) {
         EmvTag dol = EmvTag.findTag(dolTagId);
@@ -258,6 +263,7 @@ public abstract class EmvApplet extends Applet {
             i++;
 
             if (searchTagId != 0 && tagId == searchTagId) {
+                dataObjectListEntryLength = valueLength;
                 return valueOffset;
             }
 

@@ -6,6 +6,7 @@ import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
 import javacard.security.CryptoException;
+import javacard.security.DESKey;
 import javacard.security.KeyBuilder;
 import javacard.security.MessageDigest;
 import javacard.security.RSAPrivateKey;
@@ -32,6 +33,11 @@ public class PaymentApplication extends EmvApplet {
 
     private static final short OFFSET_STATE = (short) 0;
     private static final short OFFSET_EXTERNAL_AUTHENTICATE_DONE = (short) 1;
+    private static final short OFFSET_ISSUER_AUTHENTICATION_FAILED = (short) 2;
+
+    // ARPC generation methods (EMV Book 2, 8.2 Issuer Authentication)
+    private static final byte ARPC_METHOD_1 = (byte) 0x01;
+    private static final byte ARPC_METHOD_2 = (byte) 0x02;
 
     private Cipher rsaCipher;
     private MessageDigest shaMessageDigest;
@@ -55,6 +61,20 @@ public class PaymentApplication extends EmvApplet {
     private byte[] pinBlock = null;
     private boolean useRandom = true;
 
+    // ICC Application Cryptogram Master Key MK_AC, Application Cryptogram is static tag 9F26 when not set
+    private DESKey applicationCryptogramMasterKey = null;
+    // Include Issuer Application Data in Application Cryptogram generation (EMV Book 2, CCD 8.1.1)
+    private boolean includeIssuerApplicationDataInAc = false;
+    private Cipher desCipher;
+    // Application Cryptogram Session Key SK_AC halves for ISO/IEC 9797-1 MAC Algorithm 3
+    private DESKey sessionKeyLeft;
+    private DESKey sessionKeyRight;
+    private byte[] macBlock;
+    private short macBlockOffset = 0;
+    private byte arpcMethod = ARPC_METHOD_1;
+    // ARQC of the current transaction, input for ARPC verification
+    private byte[] authorisationRequestCryptogram;
+
     protected void processSetSettings(APDU apdu, byte[] buf, short dataLength) {
         short settingsId = Util.getShort(buf, ISO7816.OFFSET_P1);
         switch (settingsId) {
@@ -76,6 +96,7 @@ public class PaymentApplication extends EmvApplet {
                 }
                 short flags = Util.getShort(buf, ISO7816.OFFSET_CDATA);
                 useRandom = ((flags & (1 << 0)) != 0);
+                includeIssuerApplicationDataInAc = ((flags & (1 << 1)) != 0);
                 break;
             // ICC RSA KEY MODULUS
             case 0x0004:
@@ -117,6 +138,32 @@ public class PaymentApplication extends EmvApplet {
                 defaultReadRecord = new byte[dataLength];
                 Util.arrayCopy(buf, (short) ISO7816.OFFSET_CDATA, defaultReadRecord, (short) 0, dataLength);
                 break;
+            // ICC APPLICATION CRYPTOGRAM MASTER KEY (double length Triple DES), empty data clears the key
+            case 0x0007:
+                if (dataLength == (short) 0) {
+                    if (applicationCryptogramMasterKey != null) {
+                        applicationCryptogramMasterKey.clearKey();
+                    }
+                    break;
+                }
+                if (dataLength != (short) 16) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                if (applicationCryptogramMasterKey == null) {
+                    applicationCryptogramMasterKey = (DESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_DES, KeyBuilder.LENGTH_DES3_2KEY, false);
+                }
+                applicationCryptogramMasterKey.setKey(buf, (short) ISO7816.OFFSET_CDATA);
+                break;
+            // ARPC METHOD
+            case 0x0008:
+                if (dataLength != (short) 1) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                if (buf[ISO7816.OFFSET_CDATA] != ARPC_METHOD_1 && buf[ISO7816.OFFSET_CDATA] != ARPC_METHOD_2) {
+                    ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                }
+                arpcMethod = buf[ISO7816.OFFSET_CDATA];
+                break;
             default:
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
@@ -135,7 +182,8 @@ public class PaymentApplication extends EmvApplet {
 
         tag9f4cDynamicNumber = JCSystem.makeTransientByteArray((short) 3, JCSystem.CLEAR_ON_DESELECT);
 
-        transactionState = JCSystem.makeTransientByteArray((short) 2, JCSystem.CLEAR_ON_DESELECT);
+        transactionState = JCSystem.makeTransientByteArray((short) 3, JCSystem.CLEAR_ON_DESELECT);
+        authorisationRequestCryptogram = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
 
         pdolData = new byte[255];
         cdol1Data = new byte[255];
@@ -146,6 +194,11 @@ public class PaymentApplication extends EmvApplet {
         rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_NOPAD, false);
 
         shaMessageDigest = MessageDigest.getInstance(MessageDigest.ALG_SHA, false);
+
+        desCipher = Cipher.getInstance(Cipher.ALG_DES_ECB_NOPAD, false);
+        sessionKeyLeft = (DESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_DES_TRANSIENT_DESELECT, KeyBuilder.LENGTH_DES, false);
+        sessionKeyRight = (DESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_DES_TRANSIENT_DESELECT, KeyBuilder.LENGTH_DES, false);
+        macBlock = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
     }
 
     /**
@@ -304,10 +357,30 @@ public class PaymentApplication extends EmvApplet {
             cdol1DataLength = storeDataObjectListData((short) 0x008C, buf, dataLength, cdol1Data);
         }
 
+        if (secondGenerateAc && isApplicationCryptogramMasterKeySet()) {
+            verifyIssuerAuthenticationDataInCdol2();
+        }
+
         byte responseCryptogramType = requestCryptogramType;
+
+        // Transaction is declined when issuer authentication has failed
+        if (responseCryptogramType == CID_TC && transactionState[OFFSET_ISSUER_AUTHENTICATION_FAILED] != (byte) 0x00) {
+            responseCryptogramType = CID_AAC;
+        }
 
         tmpBuffer[0] = responseCryptogramType;
         EmvTag.setTag((short) 0x9F27, tmpBuffer, (short) 0, (byte) 1);
+
+        if (isApplicationCryptogramMasterKeySet()) {
+            if (secondGenerateAc) {
+                generateApplicationCryptogram(cdol2Data, cdol2DataLength);
+            } else {
+                generateApplicationCryptogram(cdol1Data, cdol1DataLength);
+                if (responseCryptogramType == CID_ARQC) {
+                    Util.arrayCopyNonAtomic(EmvTag.findTag((short) 0x9F26).getData(), (short) 0, authorisationRequestCryptogram, (short) 0, (short) 8);
+                }
+            }
+        }
 
         // CDA signature is not generated for AAC
         if (cdaRequested && responseCryptogramType != CID_AAC) {
@@ -321,6 +394,179 @@ public class PaymentApplication extends EmvApplet {
         } else {
             transactionState[OFFSET_STATE] = STATE_COMPLETED;
         }
+    }
+
+    private boolean isApplicationCryptogramMasterKeySet() {
+        return applicationCryptogramMasterKey != null && applicationCryptogramMasterKey.isInitialized();
+    }
+
+    /**
+     * Verify Issuer Authentication Data (tag 91) included in CDOL2 related data (EMV Book 3, CCD 6.5.5).
+     * Zero filled data means that the terminal did not receive Issuer Authentication Data.
+     */
+    private void verifyIssuerAuthenticationDataInCdol2() {
+        short offset = findDataObjectListEntry((short) 0x008D, (short) 0x0091);
+        if (offset < 0) {
+            return;
+        }
+
+        short length = dataObjectListEntryLength;
+        boolean received = false;
+        for (short i = (short) 0; i < length; i++) {
+            if (cdol2Data[(short) (offset + i)] != (byte) 0x00) {
+                received = true;
+                break;
+            }
+        }
+
+        if (received && !verifyIssuerAuthenticationData(cdol2Data, offset, length)) {
+            transactionState[OFFSET_ISSUER_AUTHENTICATION_FAILED] = (byte) 0x01;
+        }
+    }
+
+    /**
+     * Verify ARPC in Issuer Authentication Data (tag 91) with the Application Cryptogram Session Key (EMV Book 2, 8.2).
+     * Method 1: Issuer Authentication Data := ARPC (8) || ARC (2), ARPC := DES3(SK_AC)[ARQC XOR (ARC || '00' .. '00')]
+     * Method 2: Issuer Authentication Data := ARPC (4) || CSU (4) || Proprietary Authentication Data (0-8),
+     *           ARPC := MAC(SK_AC)[ARQC || CSU || Proprietary Authentication Data] with s = 4
+     */
+    private boolean verifyIssuerAuthenticationData(byte[] src, short offset, short length) {
+        EmvTag applicationTransactionCounter = EmvTag.findTag((short) 0x9F36);
+        if (applicationTransactionCounter == null || applicationTransactionCounter.getLength() != (byte) 2) {
+            return false;
+        }
+
+        deriveApplicationCryptogramSessionKey(applicationTransactionCounter.getData());
+
+        short arpcLength;
+        if (arpcMethod == ARPC_METHOD_1) {
+            if (length != (short) 10) {
+                return false;
+            }
+            arpcLength = (short) 8;
+
+            Util.arrayCopyNonAtomic(authorisationRequestCryptogram, (short) 0, tmpBuffer, (short) 0, (short) 8);
+            tmpBuffer[0] ^= src[(short) (offset + 8)];
+            tmpBuffer[1] ^= src[(short) (offset + 9)];
+
+            // Single block CBC-MAC with output transformation 3 equals Triple DES encryption
+            macInit();
+            macUpdate(tmpBuffer, (short) 0, (short) 8);
+            macOutputTransformation(tmpBuffer, (short) 0);
+        } else {
+            if (length < (short) 8 || length > (short) 16) {
+                return false;
+            }
+            arpcLength = (short) 4;
+
+            macInit();
+            macUpdate(authorisationRequestCryptogram, (short) 0, (short) 8);
+            macUpdate(src, (short) (offset + 4), (short) 4);
+            // Proprietary Authentication Data is included only when indicated by CSU (EMV Book 2, CCD 8.2.2)
+            if ((src[(short) (offset + 4)] & (byte) 0x80) != 0) {
+                macUpdate(src, (short) (offset + 8), (short) (length - 8));
+            }
+            macFinal(tmpBuffer, (short) 0);
+        }
+
+        return Util.arrayCompare(tmpBuffer, (short) 0, src, offset, arpcLength) == (byte) 0x00;
+    }
+
+    /**
+     * Generate Application Cryptogram (tag 9F26) with Triple DES (EMV Book 2, 8.1 Application Cryptogram Generation).
+     * MAC is computed over the CDOL related data of the GENERATE AC command, AIP and ATC,
+     * and optionally the Issuer Application Data as in the Common Core Definitions.
+     */
+    private void generateApplicationCryptogram(byte[] cdolData, short cdolDataLength) {
+        EmvTag applicationTransactionCounter = EmvTag.findTag((short) 0x9F36);
+        EmvTag applicationInterchangeProfile = EmvTag.findTag((short) 0x0082);
+        if (applicationTransactionCounter == null || applicationTransactionCounter.getLength() != (byte) 2
+            || applicationInterchangeProfile == null || applicationInterchangeProfile.getLength() != (byte) 2) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        deriveApplicationCryptogramSessionKey(applicationTransactionCounter.getData());
+
+        macInit();
+        macUpdate(cdolData, (short) 0, cdolDataLength);
+        macUpdate(applicationInterchangeProfile.getData(), (short) 0, (short) 2);
+        macUpdate(applicationTransactionCounter.getData(), (short) 0, (short) 2);
+        if (includeIssuerApplicationDataInAc) {
+            EmvTag issuerApplicationData = EmvTag.findTag((short) 0x9F10);
+            if (issuerApplicationData != null) {
+                macUpdate(issuerApplicationData.getData(), (short) 0, (short) (issuerApplicationData.getLength() & 0x00FF));
+            }
+        }
+        macFinal(tmpBuffer, (short) 0);
+
+        EmvTag.setTag((short) 0x9F26, tmpBuffer, (short) 0, (byte) 8);
+    }
+
+    /**
+     * Derive Application Cryptogram Session Key SK_AC from MK_AC and ATC (EMV Book 2, A1.3.1 Common Session Key Derivation Option).
+     * R := ATC || '00' || '00' || '00' || '00' || '00' || '00'
+     * SK_AC := DES3(MK_AC)[R0 || R1 || 'F0' || R3 .. R7] || DES3(MK_AC)[R0 || R1 || '0F' || R3 .. R7]
+     */
+    private void deriveApplicationCryptogramSessionKey(byte[] applicationTransactionCounter) {
+        Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 16, (byte) 0x00);
+        Util.arrayCopyNonAtomic(applicationTransactionCounter, (short) 0, tmpBuffer, (short) 0, (short) 2);
+        Util.arrayCopyNonAtomic(applicationTransactionCounter, (short) 0, tmpBuffer, (short) 8, (short) 2);
+        tmpBuffer[2] = (byte) 0xF0;
+        tmpBuffer[10] = (byte) 0x0F;
+
+        desCipher.init(applicationCryptogramMasterKey, Cipher.MODE_ENCRYPT);
+        desCipher.doFinal(tmpBuffer, (short) 0, (short) 16, tmpBuffer, (short) 0);
+
+        sessionKeyLeft.setKey(tmpBuffer, (short) 0);
+        sessionKeyRight.setKey(tmpBuffer, (short) 8);
+
+        Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 16, (byte) 0x00);
+    }
+
+    /**
+     * Start MAC computation with ISO/IEC 9797-1 MAC Algorithm 3 using DES (EMV Book 2, A1.2.1), initial value zero.
+     */
+    private void macInit() {
+        Util.arrayFillNonAtomic(macBlock, (short) 0, (short) 8, (byte) 0x00);
+        macBlockOffset = (short) 0;
+        desCipher.init(sessionKeyLeft, Cipher.MODE_ENCRYPT);
+    }
+
+    /**
+     * CBC mode with the leftmost session key block: H(i) := DES(K_SL)[X(i) XOR H(i-1)].
+     */
+    private void macUpdate(byte[] src, short offset, short length) {
+        for (short i = (short) 0; i < length; i++) {
+            macBlock[macBlockOffset] ^= src[(short) (offset + i)];
+            macBlockOffset++;
+            if (macBlockOffset == (short) 8) {
+                desCipher.doFinal(macBlock, (short) 0, (short) 8, macBlock, (short) 0);
+                macBlockOffset = (short) 0;
+            }
+        }
+    }
+
+    /**
+     * Pad with ISO/IEC 9797-1 padding method 2 and compute the 8-byte MAC: H(B+1) := DES(K_SL)[DES^-1(K_SR)[H(B)]].
+     */
+    private void macFinal(byte[] dst, short dstOffset) {
+        macBlock[macBlockOffset] ^= (byte) 0x80;
+        desCipher.doFinal(macBlock, (short) 0, (short) 8, macBlock, (short) 0);
+
+        macOutputTransformation(dst, dstOffset);
+    }
+
+    /**
+     * ISO/IEC 9797-1 output transformation 3 of the last CBC block: DES(K_SL)[DES^-1(K_SR)[H(B)]].
+     */
+    private void macOutputTransformation(byte[] dst, short dstOffset) {
+        desCipher.init(sessionKeyRight, Cipher.MODE_DECRYPT);
+        desCipher.doFinal(macBlock, (short) 0, (short) 8, macBlock, (short) 0);
+
+        desCipher.init(sessionKeyLeft, Cipher.MODE_ENCRYPT);
+        desCipher.doFinal(macBlock, (short) 0, (short) 8, dst, dstOffset);
+
+        Util.arrayFillNonAtomic(macBlock, (short) 0, (short) 8, (byte) 0x00);
     }
 
     /**
@@ -419,7 +665,11 @@ public class PaymentApplication extends EmvApplet {
 
         transactionState[OFFSET_EXTERNAL_AUTHENTICATE_DONE] = (byte) 0x01;
 
-        // 6300 = Issuer authentication failed
+        // Without Application Cryptogram Master Key, issuer authentication always succeeds
+        if (isApplicationCryptogramMasterKeySet() && !verifyIssuerAuthenticationData(buf, ISO7816.OFFSET_CDATA, dataLength)) {
+            transactionState[OFFSET_ISSUER_AUTHENTICATION_FAILED] = (byte) 0x01;
+            EmvApplet.logAndThrow(SW_ISSUER_AUTHENTICATION_FAILED);
+        }
 
         EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
     }
@@ -497,6 +747,7 @@ public class PaymentApplication extends EmvApplet {
 
         transactionState[OFFSET_STATE] = STATE_GPO_DONE;
         transactionState[OFFSET_EXTERNAL_AUTHENTICATE_DONE] = (byte) 0x00;
+        transactionState[OFFSET_ISSUER_AUTHENTICATION_FAILED] = (byte) 0x00;
     }
 
     /**

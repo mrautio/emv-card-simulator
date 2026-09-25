@@ -8,6 +8,7 @@ use log4rs::{
     append::console::ConsoleAppender,
     config::{Appender, Root},
 };
+use openssl::symm::{Cipher, Crypter, Mode};
 use serde::Deserialize;
 use std::error;
 use std::fs::{self};
@@ -105,6 +106,46 @@ impl ApduRequestResponse {
     }
 }
 
+// ICC Application Cryptogram Master Key MK_AC personalized in card_setup_app_apdus.yaml
+const AC_MASTER_KEY: &str = "0123456789ABCDEFFEDCBA9876543210";
+// Authorisation Response Code '00' = approved
+const AUTHORISATION_RESPONSE_CODE: &[u8] = b"00";
+
+fn triple_des_encrypt(double_length_key: &[u8], data: &[u8]) -> Vec<u8> {
+    let mut key = double_length_key.to_vec();
+    key.extend_from_slice(&double_length_key[0..8]);
+
+    let mut crypter = Crypter::new(Cipher::des_ede3(), Mode::Encrypt, &key, None).unwrap();
+    crypter.pad(false);
+
+    let mut output = vec![0; data.len() + 8];
+    let mut length = crypter.update(data, &mut output).unwrap();
+    length += crypter.finalize(&mut output[length..]).unwrap();
+    output.truncate(length);
+    output
+}
+
+/// Issuer Authentication Data (tag 91) with ARPC Method 1 as the issuer would generate it.
+/// EMV Book 2, A1.3.1 session key derivation and 8.2.1 ARPC Method 1: ARPC || ARC
+fn issuer_authentication_data(arqc: &[u8], atc: &[u8]) -> Vec<u8> {
+    let master_key = hex::decode(AC_MASTER_KEY).unwrap();
+
+    let mut diversification = vec![0u8; 16];
+    diversification[0..2].copy_from_slice(atc);
+    diversification[2] = 0xF0;
+    diversification[8..10].copy_from_slice(atc);
+    diversification[10] = 0x0F;
+    let session_key = triple_des_encrypt(&master_key, &diversification);
+
+    let mut y = arqc.to_vec();
+    y[0] ^= AUTHORISATION_RESPONSE_CODE[0];
+    y[1] ^= AUTHORISATION_RESPONSE_CODE[1];
+
+    let mut result = triple_des_encrypt(&session_key, &y);
+    result.extend_from_slice(AUTHORISATION_RESPONSE_CODE);
+    result
+}
+
 fn pin_entry() -> Result<String, ()> {
     Ok("1234".to_string())
 }
@@ -116,9 +157,6 @@ fn start_transaction(connection: &mut EmvConnection) -> Result<(), ()> {
     // force unpreditable number
     connection.add_tag("9F37", b"\x01\x23\x45\x67".to_vec());
     connection.settings.terminal.use_random = false;
-
-    // force issuer authentication data
-    connection.add_tag("91", b"\x12\x34\x56\x78\x12\x34\x56\x78".to_vec());
 
     // transaction amount 0,01 EUR
     connection.add_tag("9F02", b"\x00\x00\x00\x00\x00\x01".to_vec());
@@ -201,6 +239,12 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
         if let CryptogramType::AuthorisationRequestCryptogram =
             connection.handle_1st_generate_ac().unwrap()
         {
+            // Online authorisation response from the issuer
+            let arqc = connection.get_tag_value("9F26").unwrap().clone();
+            let atc = connection.get_tag_value("9F36").unwrap().clone();
+            connection.add_tag("8A", AUTHORISATION_RESPONSE_CODE.to_vec());
+            connection.add_tag("91", issuer_authentication_data(&arqc, &atc));
+
             connection.handle_issuer_authentication_data().unwrap();
             connection.handle_2nd_generate_ac().unwrap();
         }

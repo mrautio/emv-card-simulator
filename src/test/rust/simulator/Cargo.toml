@@ -12,6 +12,7 @@ jni = "0.21.1"
 log = "0.4.34"
 log4rs = "1.4.0"
 hex = "0.4.3"
+openssl = "0.10.81"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9.34"
 

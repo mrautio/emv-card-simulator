@@ -776,6 +776,7 @@ dependencies = [
  "jni",
  "log",
  "log4rs",
+ "openssl",
  "serde",
  "serde_yaml",
 ]
