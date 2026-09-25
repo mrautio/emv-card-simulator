@@ -77,7 +77,7 @@ public class PaymentSystemEnvironment extends EmvApplet {
                 processReadRecord(apdu, buf);
                 break;
             default:
-                EmvApplet.logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
+                commandNotSupported(cmd);
         }
     }
 }

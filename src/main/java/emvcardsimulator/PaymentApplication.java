@@ -72,8 +72,15 @@ public class PaymentApplication extends EmvApplet {
     private byte[] macBlock;
     private short macBlockOffset = 0;
     private byte arpcMethod = ARPC_METHOD_1;
-    // ARQC of the current transaction, input for ARPC verification
-    private byte[] authorisationRequestCryptogram;
+    // Application Cryptogram of the first GENERATE AC, input for ARPC and secure messaging session key
+    private byte[] firstApplicationCryptogram;
+
+    // ICC Secure Messaging for Integrity Master Key MK_SMI (EMV Book 2, 9.2)
+    private DESKey secureMessagingMacMasterKey = null;
+    // MAC chaining value of issuer script commands (EMV Book 2, 9.2.3.1)
+    private byte[] secureMessagingMacChain;
+    // APPLICATION BLOCK state (EMV Book 3, 6.5.1)
+    private boolean applicationBlocked = false;
 
     protected void processSetSettings(APDU apdu, byte[] buf, short dataLength) {
         short settingsId = Util.getShort(buf, ISO7816.OFFSET_P1);
@@ -140,19 +147,7 @@ public class PaymentApplication extends EmvApplet {
                 break;
             // ICC APPLICATION CRYPTOGRAM MASTER KEY (double length Triple DES), empty data clears the key
             case 0x0007:
-                if (dataLength == (short) 0) {
-                    if (applicationCryptogramMasterKey != null) {
-                        applicationCryptogramMasterKey.clearKey();
-                    }
-                    break;
-                }
-                if (dataLength != (short) 16) {
-                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-                }
-                if (applicationCryptogramMasterKey == null) {
-                    applicationCryptogramMasterKey = (DESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_DES, KeyBuilder.LENGTH_DES3_2KEY, false);
-                }
-                applicationCryptogramMasterKey.setKey(buf, (short) ISO7816.OFFSET_CDATA);
+                applicationCryptogramMasterKey = setMasterKey(applicationCryptogramMasterKey, buf, dataLength);
                 break;
             // ARPC METHOD
             case 0x0008:
@@ -164,11 +159,45 @@ public class PaymentApplication extends EmvApplet {
                 }
                 arpcMethod = buf[ISO7816.OFFSET_CDATA];
                 break;
+            // ICC SECURE MESSAGING FOR INTEGRITY MASTER KEY (double length Triple DES), empty data clears the key
+            case 0x0009:
+                secureMessagingMacMasterKey = setMasterKey(secureMessagingMacMasterKey, buf, dataLength);
+                break;
             default:
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    /**
+     * Set double length Triple DES master key from command data, empty data clears the key.
+     */
+    private static DESKey setMasterKey(DESKey key, byte[] buf, short dataLength) {
+        if (dataLength == (short) 0) {
+            if (key != null) {
+                key.clearKey();
+            }
+            return key;
+        }
+        if (dataLength != (short) 16) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+        if (key == null) {
+            key = (DESKey) KeyBuilder.buildKey(KeyBuilder.TYPE_DES, KeyBuilder.LENGTH_DES3_2KEY, false);
+        }
+        key.setKey(buf, (short) ISO7816.OFFSET_CDATA);
+        return key;
+    }
+
+    private static boolean isKeySet(DESKey key) {
+        return key != null && key.isInitialized();
+    }
+
+    protected void factoryReset() {
+        super.factoryReset();
+
+        applicationBlocked = false;
     }
 
     protected PaymentApplication(byte[] buffer, short offset, byte length) {
@@ -183,7 +212,8 @@ public class PaymentApplication extends EmvApplet {
         tag9f4cDynamicNumber = JCSystem.makeTransientByteArray((short) 3, JCSystem.CLEAR_ON_DESELECT);
 
         transactionState = JCSystem.makeTransientByteArray((short) 3, JCSystem.CLEAR_ON_DESELECT);
-        authorisationRequestCryptogram = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
+        firstApplicationCryptogram = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
+        secureMessagingMacChain = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
 
         pdolData = new byte[255];
         cdol1Data = new byte[255];
@@ -262,6 +292,10 @@ public class PaymentApplication extends EmvApplet {
     }
 
     protected void processSelect(APDU apdu, byte[] buf) {
+        if (applicationBlocked) {
+            EmvApplet.logAndThrow(SW_SELECTED_FILE_INVALIDATED);
+        }
+
         // Check if PAN (tag A5) exists in the ICC
         if (EmvTag.findTag((short) 0x5A) != null) {
             if (tagA5Fci != null) {
@@ -368,6 +402,11 @@ public class PaymentApplication extends EmvApplet {
             responseCryptogramType = CID_AAC;
         }
 
+        // Blocked application returns only AAC
+        if (applicationBlocked) {
+            responseCryptogramType = CID_AAC;
+        }
+
         tmpBuffer[0] = responseCryptogramType;
         EmvTag.setTag((short) 0x9F27, tmpBuffer, (short) 0, (byte) 1);
 
@@ -376,9 +415,15 @@ public class PaymentApplication extends EmvApplet {
                 generateApplicationCryptogram(cdol2Data, cdol2DataLength);
             } else {
                 generateApplicationCryptogram(cdol1Data, cdol1DataLength);
-                if (responseCryptogramType == CID_ARQC) {
-                    Util.arrayCopyNonAtomic(EmvTag.findTag((short) 0x9F26).getData(), (short) 0, authorisationRequestCryptogram, (short) 0, (short) 8);
-                }
+            }
+        }
+
+        if (!secondGenerateAc) {
+            EmvTag applicationCryptogram = EmvTag.findTag((short) 0x9F26);
+            if (applicationCryptogram != null && applicationCryptogram.getLength() == (byte) 8) {
+                Util.arrayCopyNonAtomic(applicationCryptogram.getData(), (short) 0, firstApplicationCryptogram, (short) 0, (short) 8);
+                // First script command MAC is chained from the Application Cryptogram
+                Util.arrayCopyNonAtomic(applicationCryptogram.getData(), (short) 0, secureMessagingMacChain, (short) 0, (short) 8);
             }
         }
 
@@ -397,7 +442,7 @@ public class PaymentApplication extends EmvApplet {
     }
 
     private boolean isApplicationCryptogramMasterKeySet() {
-        return applicationCryptogramMasterKey != null && applicationCryptogramMasterKey.isInitialized();
+        return isKeySet(applicationCryptogramMasterKey);
     }
 
     /**
@@ -445,7 +490,7 @@ public class PaymentApplication extends EmvApplet {
             }
             arpcLength = (short) 8;
 
-            Util.arrayCopyNonAtomic(authorisationRequestCryptogram, (short) 0, tmpBuffer, (short) 0, (short) 8);
+            Util.arrayCopyNonAtomic(firstApplicationCryptogram, (short) 0, tmpBuffer, (short) 0, (short) 8);
             tmpBuffer[0] ^= src[(short) (offset + 8)];
             tmpBuffer[1] ^= src[(short) (offset + 9)];
 
@@ -460,7 +505,7 @@ public class PaymentApplication extends EmvApplet {
             arpcLength = (short) 4;
 
             macInit();
-            macUpdate(authorisationRequestCryptogram, (short) 0, (short) 8);
+            macUpdate(firstApplicationCryptogram, (short) 0, (short) 8);
             macUpdate(src, (short) (offset + 4), (short) 4);
             // Proprietary Authentication Data is included only when indicated by CSU (EMV Book 2, CCD 8.2.2)
             if ((src[(short) (offset + 4)] & (byte) 0x80) != 0) {
@@ -505,16 +550,24 @@ public class PaymentApplication extends EmvApplet {
     /**
      * Derive Application Cryptogram Session Key SK_AC from MK_AC and ATC (EMV Book 2, A1.3.1 Common Session Key Derivation Option).
      * R := ATC || '00' || '00' || '00' || '00' || '00' || '00'
-     * SK_AC := DES3(MK_AC)[R0 || R1 || 'F0' || R3 .. R7] || DES3(MK_AC)[R0 || R1 || '0F' || R3 .. R7]
      */
     private void deriveApplicationCryptogramSessionKey(byte[] applicationTransactionCounter) {
+        deriveSessionKey(applicationCryptogramMasterKey, applicationTransactionCounter, (short) 2);
+    }
+
+    /**
+     * Derive session key from master key MK and diversification value R, R is zero padded to 8 bytes
+     * (EMV Book 2, A1.3.1 Common Session Key Derivation Option).
+     * SK := DES3(MK)[R0 || R1 || 'F0' || R3 .. R7] || DES3(MK)[R0 || R1 || '0F' || R3 .. R7]
+     */
+    private void deriveSessionKey(DESKey masterKey, byte[] diversification, short diversificationLength) {
         Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 16, (byte) 0x00);
-        Util.arrayCopyNonAtomic(applicationTransactionCounter, (short) 0, tmpBuffer, (short) 0, (short) 2);
-        Util.arrayCopyNonAtomic(applicationTransactionCounter, (short) 0, tmpBuffer, (short) 8, (short) 2);
+        Util.arrayCopyNonAtomic(diversification, (short) 0, tmpBuffer, (short) 0, diversificationLength);
+        Util.arrayCopyNonAtomic(diversification, (short) 0, tmpBuffer, (short) 8, diversificationLength);
         tmpBuffer[2] = (byte) 0xF0;
         tmpBuffer[10] = (byte) 0x0F;
 
-        desCipher.init(applicationCryptogramMasterKey, Cipher.MODE_ENCRYPT);
+        desCipher.init(masterKey, Cipher.MODE_ENCRYPT);
         desCipher.doFinal(tmpBuffer, (short) 0, (short) 16, tmpBuffer, (short) 0);
 
         sessionKeyLeft.setKey(tmpBuffer, (short) 0);
@@ -894,6 +947,124 @@ public class PaymentApplication extends EmvApplet {
         }
     }
 
+    /**
+     * Verify secure messaging format 1 command data field: optional data object followed by MAC data object '8E'
+     * (EMV Book 2, 9.2 Secure Messaging for Integrity and Authentication, Annex D2).
+     * MAC is computed with the MAC Session Key derived from MK_SMI and the Application Cryptogram of the first GENERATE AC over
+     * chaining value || CLA INS P1 P2 || '80 00 00 00' || data object || padding.
+     */
+    private void verifySecureMessaging(byte[] buf, short dataLength) {
+        final short end = (short) (ISO7816.OFFSET_CDATA + dataLength);
+        short offset = (short) ISO7816.OFFSET_CDATA;
+
+        // Plaintext ('81', 'B3') or enciphered ('87') command data object, odd tags are included in the MAC
+        short dataObjectOffset = (short) -1;
+        short dataObjectLength = (short) 0;
+        if (offset < end && buf[offset] != (byte) 0x8E) {
+            byte tag = buf[offset];
+            if (tag != (byte) 0x81 && tag != (byte) 0x87 && tag != (byte) 0xB3) {
+                EmvApplet.logAndThrow(SW_INCORRECT_SM_DATA_OBJECTS);
+            }
+
+            short headerLength = (short) 2;
+            short valueLength = (short) ((short) (offset + 1) < end ? (buf[(short) (offset + 1)] & 0x00FF) : 0x00FF);
+            if (valueLength == (short) 0x81 && (short) (offset + 2) < end) {
+                headerLength = (short) 3;
+                valueLength = (short) (buf[(short) (offset + 2)] & 0x00FF);
+            } else if (valueLength > (short) 0x7F) {
+                EmvApplet.logAndThrow(SW_INCORRECT_SM_DATA_OBJECTS);
+            }
+
+            dataObjectOffset = offset;
+            dataObjectLength = (short) (headerLength + valueLength);
+            offset += dataObjectLength;
+        }
+
+        if (offset >= end || buf[offset] != (byte) 0x8E) {
+            EmvApplet.logAndThrow(SW_EXPECTED_SM_DATA_OBJECTS_MISSING);
+        }
+
+        short macLength = (short) ((short) (offset + 1) < end ? (buf[(short) (offset + 1)] & 0x00FF) : 0);
+        short macOffset = (short) (offset + 2);
+        if (macLength < (short) 4 || macLength > (short) 8 || (short) (macOffset + macLength) != end) {
+            EmvApplet.logAndThrow(SW_INCORRECT_SM_DATA_OBJECTS);
+        }
+
+        deriveSessionKey(secureMessagingMacMasterKey, firstApplicationCryptogram, (short) 8);
+
+        macInit();
+        macUpdate(secureMessagingMacChain, (short) 0, (short) 8);
+        macUpdate(buf, (short) ISO7816.OFFSET_CLA, (short) 4);
+        if (dataObjectOffset >= 0) {
+            Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 4, (byte) 0x00);
+            tmpBuffer[0] = (byte) 0x80;
+            macUpdate(tmpBuffer, (short) 0, (short) 4);
+            macUpdate(buf, dataObjectOffset, dataObjectLength);
+        }
+        // Full MAC is the chaining value of the next script command
+        macFinal(secureMessagingMacChain, (short) 0);
+
+        if (Util.arrayCompare(secureMessagingMacChain, (short) 0, buf, macOffset, macLength) != (byte) 0x00) {
+            EmvApplet.logAndThrow(SW_INCORRECT_SM_DATA_OBJECTS);
+        }
+    }
+
+    /**
+     * Process issuer script command delivered after the first GENERATE AC (EMV Book 3, 10.10 Issuer-to-Card Script Processing).
+     */
+    private void processScriptCommand(APDU apdu, byte[] buf, short cmd, short dataLength) {
+        if (transactionState[OFFSET_STATE] != STATE_ARQC_ISSUED && transactionState[OFFSET_STATE] != STATE_COMPLETED) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        if (!isKeySet(secureMessagingMacMasterKey)) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        verifySecureMessaging(buf, dataLength);
+
+        short p1p2 = Util.getShort(buf, ISO7816.OFFSET_P1);
+        switch (cmd) {
+            // EMV Book 3, 6.5.1
+            case CMD_APPLICATION_BLOCK:
+                if (p1p2 != (short) 0x0000) {
+                    EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+                }
+                applicationBlocked = true;
+                break;
+            // EMV Book 3, 6.5.2
+            case CMD_APPLICATION_UNBLOCK:
+                if (p1p2 != (short) 0x0000) {
+                    EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+                }
+                applicationBlocked = false;
+                break;
+            // EMV Book 3, 6.5.3
+            case CMD_CARD_BLOCK:
+                if (p1p2 != (short) 0x0000) {
+                    EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+                }
+                cardBlocked = true;
+                break;
+            // EMV Book 3, 6.5.10, P2 '01' and '02' (PIN change) are reserved for payment systems
+            case CMD_PIN_CHANGE_UNBLOCK:
+                if (p1p2 != (short) 0x0000) {
+                    EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+                }
+                setPinTryCounter(PIN_TRY_LIMIT);
+                break;
+            // Payment system specific commands, placeholders that accept the command without changing data
+            case CMD_PUT_DATA:
+            case CMD_PUT_DATA_PROPRIETARY:
+            case CMD_UPDATE_RECORD:
+            case CMD_UPDATE_RECORD_PROPRIETARY:
+            default:
+                break;
+        }
+
+        EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
+    }
+
     private void processGetChallenge(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x00) {
             EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
@@ -935,8 +1106,18 @@ public class PaymentApplication extends EmvApplet {
             case CMD_EXTERNAL_AUTHENTICATE:
                 externalAuthenticate(apdu, buf, dataLength);
                 break;
+            case CMD_APPLICATION_BLOCK:
+            case CMD_APPLICATION_UNBLOCK:
+            case CMD_CARD_BLOCK:
+            case CMD_PIN_CHANGE_UNBLOCK:
+            case CMD_PUT_DATA:
+            case CMD_PUT_DATA_PROPRIETARY:
+            case CMD_UPDATE_RECORD:
+            case CMD_UPDATE_RECORD_PROPRIETARY:
+                processScriptCommand(apdu, buf, cmd, dataLength);
+                break;
             default:
-                EmvApplet.logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
+                commandNotSupported(cmd);
         }
     }
 }

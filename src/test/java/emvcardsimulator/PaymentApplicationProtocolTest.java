@@ -47,6 +47,12 @@ public class PaymentApplicationProtocolTest {
     private static final String ATC = "00F1";
     // Authorisation Response Code of CDOL2_DATA
     private static final String ARC = "5933";
+    // ICC Secure Messaging for Integrity Master Key MK_SMI of the test profile
+    private static final String SM_MAC_MASTER_KEY = "89ABCDEF01234567 76543210FEDCBA98";
+
+    // Secure messaging MAC chaining value of issuer script commands
+    private byte[] secureMessagingMacChain;
+    private byte[] secureMessagingSessionKey;
 
     private BigInteger iccModulus;
 
@@ -94,10 +100,19 @@ public class PaymentApplicationProtocolTest {
     /**
      * Application Cryptogram Session Key, EMV Book 2 A1.3.1 Common Session Key Derivation Option.
      */
-    private static byte[] deriveSessionKey(byte[] masterKey, byte[] atc) throws GeneralSecurityException {
-        byte[] f1 = concat(atc, hex("F0 00 00 00 00 00"));
-        byte[] f2 = concat(atc, hex("0F 00 00 00 00 00"));
+    private static byte[] deriveSessionKey(byte[] masterKey, byte[] diversification) throws GeneralSecurityException {
+        byte[] f1 = Arrays.copyOf(diversification, 8);
+        byte[] f2 = Arrays.copyOf(diversification, 8);
+        f1[2] = (byte) 0xF0;
+        f2[2] = (byte) 0x0F;
         return des(Cipher.ENCRYPT_MODE, masterKey, concat(f1, f2));
+    }
+
+    /**
+     * ISO/IEC 7816-4 padding: '80' followed by '00' bytes to a multiple of 8 bytes.
+     */
+    private static byte[] pad(byte[] data) {
+        return Arrays.copyOf(concat(data, hex("80")), (data.length / 8 + 1) * 8);
     }
 
     /**
@@ -107,7 +122,15 @@ public class PaymentApplicationProtocolTest {
         byte[] keyLeft = Arrays.copyOfRange(sessionKey, 0, 8);
         byte[] keyRight = Arrays.copyOfRange(sessionKey, 8, 16);
 
-        byte[] padded = Arrays.copyOf(concat(message, hex("80")), (message.length / 8 + 1) * 8);
+        return macAlgorithm3(sessionKey, pad(message));
+    }
+
+    /**
+     * ISO/IEC 9797-1 MAC Algorithm 3 over already padded data, EMV Book 2 A1.2.1 step 3.
+     */
+    private static byte[] macAlgorithm3(byte[] sessionKey, byte[] padded) throws GeneralSecurityException {
+        byte[] keyLeft = Arrays.copyOfRange(sessionKey, 0, 8);
+        byte[] keyRight = Arrays.copyOfRange(sessionKey, 8, 16);
 
         byte[] block = new byte[8];
         for (int offset = 0; offset < padded.length; offset += 8) {
@@ -169,6 +192,36 @@ public class PaymentApplicationProtocolTest {
         assertSw(0x9000, response);
         assertArrayEquals(applicationCryptogram(hex(ATC), hex(cdol2Data), hex(AIP), hex(ATC)), findTag(response.getData(), 0x9F26));
         return findTag(response.getData(), 0x9F27)[0];
+    }
+
+    /**
+     * Start issuer script secure messaging: MAC Session Key from MK_SMI and the first Application Cryptogram (EMV Book 2, 9.2.2),
+     * and the first MAC chaining value is the Application Cryptogram (EMV Book 2, 9.2.3.1).
+     */
+    private void startSecureMessaging(byte[] applicationCryptogram) throws GeneralSecurityException {
+        secureMessagingSessionKey = deriveSessionKey(hex(SM_MAC_MASTER_KEY), applicationCryptogram);
+        secureMessagingMacChain = applicationCryptogram;
+    }
+
+    /**
+     * Issuer script command with secure messaging format 1 (EMV Book 2, Annex D2).
+     * MAC input: chaining value || header || '80 00 00 00' || padded data object
+     */
+    private String scriptCommand(String header, String dataObject, int macLength) throws GeneralSecurityException {
+        byte[] input = concat(secureMessagingMacChain, hex(header), hex("80 00 00 00"));
+        if (!dataObject.isEmpty()) {
+            input = concat(input, pad(hex(dataObject)));
+        }
+
+        byte[] mac = macAlgorithm3(secureMessagingSessionKey, input);
+        secureMessagingMacChain = mac;
+
+        byte[] data = concat(hex(dataObject), new byte[] { (byte) 0x8E, (byte) macLength }, Arrays.copyOf(mac, macLength));
+        return header + String.format(" %02X ", data.length) + toHex(data);
+    }
+
+    private String scriptCommand(String header) throws GeneralSecurityException {
+        return scriptCommand(header, "", 8);
     }
 
     private static ResponseAPDU send(String apdu) throws CardException {
@@ -301,6 +354,8 @@ public class PaymentApplicationProtocolTest {
         assertSw(ISO7816.SW_CLA_NOT_SUPPORTED, send("E0 00 00 01 02 12 34"));
         assertSw(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED, send("84 1E 00 00 08 01 02 03 04 05 06 07 08"));
         assertSw(ISO7816.SW_INS_NOT_SUPPORTED, send("00 CA 9F 36 00"));
+        // Secure messaging format 1 only for issuer script commands
+        assertSw(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED, send("8C CA 9F 36 00"));
     }
 
     @Test
@@ -607,6 +662,173 @@ public class PaymentApplicationProtocolTest {
 
         // Terminal fills missing Issuer Authentication Data with zeros, e.g. when unable to go online
         assertEquals((byte) 0x40, completeTransaction("5A33 00 00 00 00 00 00 00 00 " + CDOL1_DATA));
+    }
+
+    @Test
+    public void secureMessagingReferenceTest() throws GeneralSecurityException {
+        // Session key derivation with 8-byte diversification value replaces the third byte, EMV Book 2 A1.3.1
+        byte[] r = hex("11 22 33 44 55 66 77 88");
+        byte[] expected = concat(
+            des(Cipher.ENCRYPT_MODE, hex(SM_MAC_MASTER_KEY), hex("11 22 F0 44 55 66 77 88")),
+            des(Cipher.ENCRYPT_MODE, hex(SM_MAC_MASTER_KEY), hex("11 22 0F 44 55 66 77 88")));
+        assertArrayEquals(expected, deriveSessionKey(hex(SM_MAC_MASTER_KEY), r));
+
+        // Padding is always added
+        assertArrayEquals(hex("01 02 03 04 05 06 07 80"), pad(hex("01 02 03 04 05 06 07")));
+        assertArrayEquals(hex("01 02 03 04 05 06 07 08 80 00 00 00 00 00 00 00"), pad(hex("01 02 03 04 05 06 07 08")));
+    }
+
+    @Test
+    public void scriptApplicationBlockTest() throws CardException, GeneralSecurityException {
+        startSecureMessaging(authorisationRequest());
+
+        // Tag 71 script before the second GENERATE AC
+        assertSw(0x9000, send(scriptCommand("8C 1E 00 00")));
+
+        // Blocked application returns only AAC
+        assertEquals((byte) 0x00, completeTransaction(CDOL2_DATA));
+
+        // SELECT returns 'Selected file invalidated', application stays selected
+        assertSw(0x6283, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        ResponseAPDU response = send("80 AE 80 00 1D " + CDOL1_DATA + " 00");
+        assertSw(0x9000, response);
+        assertArrayEquals(hex("00"), findTag(response.getData(), 0x9F27));
+
+        // Tag 72 script after the final GENERATE AC, session key from the AAC of this transaction
+        startSecureMessaging(findTag(response.getData(), 0x9F26));
+        assertSw(0x9000, send(scriptCommand("8C 18 00 00")));
+
+        response = send("00 A4 04 00 07 AF FF FF FF FF 12 34 00");
+        assertSw(0x9000, response);
+        assertEquals((byte) 0x6F, response.getData()[0]);
+    }
+
+    @Test
+    public void scriptMacChainingTest() throws CardException, GeneralSecurityException {
+        startSecureMessaging(authorisationRequest());
+
+        // MAC of the second command is chained from the full MAC of the first, also when MAC is truncated to 4 bytes
+        assertSw(0x9000, send(scriptCommand("8C 1E 00 00", "", 4)));
+        assertSw(0x9000, send(scriptCommand("8C 18 00 00", "", 4)));
+        assertSw(0x9000, send(scriptCommand("8C 24 00 00", "", 8)));
+
+        assertEquals((byte) 0x40, completeTransaction(CDOL2_DATA));
+        assertSw(0x9000, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+    }
+
+    @Test
+    public void scriptMacFailureTest() throws CardException, GeneralSecurityException {
+        byte[] arqc = authorisationRequest();
+
+        // MAC not chained from the Application Cryptogram
+        startSecureMessaging(arqc);
+        secureMessagingMacChain = new byte[8];
+        assertSw(0x6988, send(scriptCommand("8C 1E 00 00")));
+
+        // MAC for another command
+        startSecureMessaging(arqc);
+        String applicationUnblock = scriptCommand("8C 18 00 00");
+        assertSw(0x6988, send("8C 1E" + applicationUnblock.substring("8C 18".length())));
+
+        // MAC data object missing or malformed
+        assertSw(0x6987, send("8C 1E 00 00 04 81 02 01 02"));
+        assertSw(0x6988, send("8C 1E 00 00 05 8E 03 01 02 03"));
+        assertSw(0x6988, send("8C 1E 00 00 0A 8E 09 01 02 03 04 05 06 07 08"));
+        assertSw(0x6988, send("8C 1E 00 00 0A 82 08 01 02 03 04 05 06 07 08"));
+
+        // Application was not blocked
+        assertEquals((byte) 0x40, completeTransaction(CDOL2_DATA));
+        assertSw(0x9000, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+    }
+
+    @Test
+    public void scriptConditionsTest() throws CardException, GeneralSecurityException {
+        // Script commands are processed only after the first GENERATE AC
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("8C 1E 00 00 0A 8E 08 01 02 03 04 05 06 07 08"));
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("8C 1E 00 00 0A 8E 08 01 02 03 04 05 06 07 08"));
+
+        // MK_SMI is required
+        assertSw(0x9000, send("80 00 00 09 00"));
+        ResponseAPDU response = send("80 AE 80 00 1D " + CDOL1_DATA + " 00");
+        assertSw(0x9000, response);
+        byte[] arqc = findTag(response.getData(), 0x9F26);
+        startSecureMessaging(arqc);
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send(scriptCommand("8C 1E 00 00")));
+
+        assertSw(ISO7816.SW_WRONG_LENGTH, send("80 00 00 09 08 01 23 45 67 89 AB CD EF"));
+        assertSw(0x9000, send("80 00 00 09 10 " + SM_MAC_MASTER_KEY));
+
+        // Rejected command did not advance the MAC chain
+        startSecureMessaging(arqc);
+        assertSw(0x9000, send(scriptCommand("8C 1E 00 00")));
+    }
+
+    @Test
+    public void scriptIncorrectParametersTest() throws CardException, GeneralSecurityException {
+        startSecureMessaging(authorisationRequest());
+
+        assertSw(ISO7816.SW_INCORRECT_P1P2, send(scriptCommand("8C 1E 00 01")));
+        assertSw(ISO7816.SW_INCORRECT_P1P2, send(scriptCommand("8C 18 01 00")));
+        assertSw(ISO7816.SW_INCORRECT_P1P2, send(scriptCommand("8C 16 00 01")));
+        // PIN change is payment system specific
+        assertSw(ISO7816.SW_INCORRECT_P1P2, send(scriptCommand("8C 24 00 01", "87 09 01 01 02 03 04 05 06 07 08", 8)));
+        assertSw(ISO7816.SW_INCORRECT_P1P2, send(scriptCommand("8C 24 00 02", "87 09 01 01 02 03 04 05 06 07 08", 8)));
+
+        // MAC chain continues after rejected commands
+        assertSw(0x9000, send(scriptCommand("8C 1E 00 00")));
+        assertEquals((byte) 0x00, completeTransaction(CDOL2_DATA));
+    }
+
+    @Test
+    public void scriptCardBlockTest() throws CardException, GeneralSecurityException {
+        try {
+            startSecureMessaging(authorisationRequest());
+            assertSw(0x9000, send(scriptCommand("8C 16 00 00")));
+
+            // All applications are disabled, also SELECT returns 'Function not supported'
+            assertSw(ISO7816.SW_FUNC_NOT_SUPPORTED, send("80 AE 40 00 1F " + CDOL2_DATA + " 00"));
+            assertSw(ISO7816.SW_FUNC_NOT_SUPPORTED, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+            assertSw(ISO7816.SW_FUNC_NOT_SUPPORTED, send("80 A8 00 00 02 83 00 00"));
+            assertSw(ISO7816.SW_FUNC_NOT_SUPPORTED, send("80 CA 9F 36 00"));
+        } finally {
+            // Simulator factory reset removes the card block
+            assertSw(0x9000, send("80 05 00 00 00"));
+        }
+        assertSw(0x9000, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+    }
+
+    @Test
+    public void scriptPinUnblockTest() throws CardException, GeneralSecurityException {
+        assertSw(0x63C2, send("00 20 00 80 08 24 12 35 FF FF FF FF FF"));
+        assertSw(0x63C1, send("00 20 00 80 08 24 12 35 FF FF FF FF FF"));
+        assertSw(0x6983, send("00 20 00 80 08 24 12 35 FF FF FF FF FF"));
+        assertSw(0x6983, send("00 20 00 80 08 24 12 34 FF FF FF FF FF"));
+
+        startSecureMessaging(authorisationRequest());
+        assertSw(0x9000, send(scriptCommand("8C 24 00 00")));
+
+        // PIN Try Counter is reset to PIN Try Limit
+        assertArrayEquals(hex("9F 17 01 03"), send("80 CA 9F 17 00").getData());
+        assertSw(0x9000, send("00 20 00 80 08 24 12 34 FF FF FF FF FF"));
+    }
+
+    @Test
+    public void scriptPutDataAndUpdateRecordPlaceholderTest() throws CardException, GeneralSecurityException {
+        final byte[] record = send("00 B2 01 14 00").getData();
+        startSecureMessaging(authorisationRequest());
+
+        // Accepted with a valid MAC, but data is not changed
+        assertSw(0x9000, send(scriptCommand("0C DA 9F 36", "81 02 12 34", 8)));
+        assertSw(0x9000, send(scriptCommand("8C DA 9F 36", "81 02 12 34", 4)));
+        assertSw(0x9000, send(scriptCommand("0C DC 01 14", "81 03 70 01 00", 8)));
+        assertSw(0x9000, send(scriptCommand("8C DC 01 14", "B3 05 9F 36 02 12 34", 8)));
+        assertSw(0x6988, send("0C DA 9F 36 0E 81 02 12 34 8E 08 01 02 03 04 05 06 07 08"));
+
+        assertArrayEquals(hex("9F 36 02 00 F1"), send("80 CA 9F 36 00").getData());
+        assertArrayEquals(record, send("00 B2 01 14 00").getData());
+        assertEquals((byte) 0x40, completeTransaction(CDOL2_DATA));
     }
 
     @Test

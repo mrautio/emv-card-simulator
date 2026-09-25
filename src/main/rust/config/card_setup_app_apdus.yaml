@@ -30,6 +30,10 @@
 # Second GENERATE AC returns AAC when issuer authentication has failed.
 - req: '80 00 00 08 01 01'
   res: '90 00'
+# ICC Secure Messaging for Integrity Master Key MK_SMI (double length 3DES) for issuer script commands.
+# Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2.
+- req: '80 00 00 09 10 89 AB CD EF 01 23 45 67 76 54 32 10 FE DC BA 98'
+  res: '90 00'
 # Setup tag templates
 - req: '80 02 00 01 04 00 82 00 94'
   res: '90 00'

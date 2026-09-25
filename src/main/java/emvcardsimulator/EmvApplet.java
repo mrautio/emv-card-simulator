@@ -57,10 +57,26 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_GET_PROCESSING_OPTIONS = (short) 0x80A8;
     protected static final short CMD_GENERATE_AC = (short) 0x80AE;
     protected static final short CMD_EXTERNAL_AUTHENTICATE = (short) 0x0082;
+    // Post-issuance commands with secure messaging format 1 (EMV Book 3, 6.5)
+    protected static final short CMD_APPLICATION_BLOCK = (short) 0x8C1E;
+    protected static final short CMD_APPLICATION_UNBLOCK = (short) 0x8C18;
+    protected static final short CMD_CARD_BLOCK = (short) 0x8C16;
+    protected static final short CMD_PIN_CHANGE_UNBLOCK = (short) 0x8C24;
+    // Payment system specific issuer script commands
+    protected static final short CMD_PUT_DATA = (short) 0x0CDA;
+    protected static final short CMD_PUT_DATA_PROPRIETARY = (short) 0x8CDA;
+    protected static final short CMD_UPDATE_RECORD = (short) 0x0CDC;
+    protected static final short CMD_UPDATE_RECORD_PROPRIETARY = (short) 0x8CDC;
 
     protected static final short SW_AUTHENTICATION_METHOD_BLOCKED = (short) 0x6983;
     protected static final short SW_REFERENCED_DATA_NOT_FOUND = (short) 0x6A88;
     protected static final short SW_ISSUER_AUTHENTICATION_FAILED = (short) 0x6300;
+    protected static final short SW_SELECTED_FILE_INVALIDATED = (short) 0x6283;
+    protected static final short SW_EXPECTED_SM_DATA_OBJECTS_MISSING = (short) 0x6987;
+    protected static final short SW_INCORRECT_SM_DATA_OBJECTS = (short) 0x6988;
+
+    // CARD BLOCK disables all applications (EMV Book 3, 6.5.3), cleared by factory reset
+    protected static boolean cardBlocked = false;
 
     public static RandomData randomData;
     public static byte[] tmpBuffer;
@@ -68,6 +84,16 @@ public abstract class EmvApplet extends Applet {
     protected static void logAndThrow(short responseTrailer) {
         ApduLog.addLogEntry(responseTrailer);
         ISOException.throwIt(responseTrailer);
+    }
+
+    /**
+     * Reject a command the application does not support, 6882 if it uses secure messaging.
+     */
+    protected static void commandNotSupported(short cmd) {
+        if ((cmd & (short) 0x0C00) != 0) {
+            logAndThrow(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED);
+        }
+        logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
     }
 
     protected EmvTag emvTags;
@@ -162,6 +188,14 @@ public abstract class EmvApplet extends Applet {
             case CMD_GET_PROCESSING_OPTIONS:
             case CMD_GENERATE_AC:
             case CMD_EXTERNAL_AUTHENTICATE:
+            case CMD_APPLICATION_BLOCK:
+            case CMD_APPLICATION_UNBLOCK:
+            case CMD_CARD_BLOCK:
+            case CMD_PIN_CHANGE_UNBLOCK:
+            case CMD_PUT_DATA:
+            case CMD_PUT_DATA_PROPRIETARY:
+            case CMD_UPDATE_RECORD:
+            case CMD_UPDATE_RECORD_PROPRIETARY:
                 return true;
             default:
                 return false;
@@ -170,6 +204,7 @@ public abstract class EmvApplet extends Applet {
 
     /**
      * Validate CLA and return CLA || INS with the logical channel bits cleared.
+     * Secure messaging bits are kept for secure messaging format 1 (CLA 'xC'), EMV Book 2, 9.1.
      */
     protected static short getCommand(byte[] buf) {
         byte cla = buf[ISO7816.OFFSET_CLA];
@@ -180,13 +215,14 @@ public abstract class EmvApplet extends Applet {
             EmvApplet.logAndThrow(ISO7816.SW_CLA_NOT_SUPPORTED);
         }
 
-        // Secure messaging indication bits
-        if ((cla & (byte) 0x0C) != 0) {
+        // Secure messaging indication bits, format 2 (CLA 'x4') is payment system proprietary
+        byte secureMessaging = (byte) (cla & (byte) 0x0C);
+        if (secureMessaging != 0 && secureMessaging != (byte) 0x0C) {
             ApduLog.addCommandLogEntry(buf, (short) 0, ISO7816.OFFSET_CDATA);
             EmvApplet.logAndThrow(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED);
         }
 
-        return Util.makeShort((byte) (cla & (byte) 0x80), buf[ISO7816.OFFSET_INS]);
+        return Util.makeShort((byte) (cla & (byte) 0x8C), buf[ISO7816.OFFSET_INS]);
     }
 
     /**
@@ -293,6 +329,11 @@ public abstract class EmvApplet extends Applet {
             return;
         }
 
+        // Blocked card responds to all commands, including SELECT, with 'Function not supported'
+        if (cardBlocked) {
+            EmvApplet.logAndThrow(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        }
+
         if (cmd == CMD_SELECT) {
             processSelect(apdu, buf);
             return;
@@ -320,6 +361,7 @@ public abstract class EmvApplet extends Applet {
 
         responseTemplateTag = (short) 0x0077;
         randomResponseSuffixData = false;
+        cardBlocked = false;
 
         JCSystem.commitTransaction();
 
