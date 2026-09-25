@@ -17,4 +17,4 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_yaml = "0.9.34"
 
 [lib]
-crate_type = ["cdylib"]
+crate-type = ["cdylib"]

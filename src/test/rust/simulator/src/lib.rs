@@ -1,6 +1,6 @@
 use hex;
 use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JValue};
-use jni::JNIEnv;
+use jni::{JNIEnv, JavaVM};
 use log::trace;
 use log::LevelFilter;
 use log4rs;
@@ -12,12 +12,13 @@ use openssl::symm::{Cipher, Crypter, Mode};
 use serde::Deserialize;
 use std::error;
 use std::fs::{self};
+use std::sync::{Mutex, OnceLock};
 
 use emvpt::*;
 
-static mut ENV: Option<JNIEnv<'static>> = None;
-static mut CALLBACK: Option<GlobalRef> = None;
-static mut APDU_RESPONSE: Vec<u8> = Vec::new();
+static JVM: OnceLock<JavaVM> = OnceLock::new();
+static CALLBACK: Mutex<Option<GlobalRef>> = Mutex::new(None);
+static APDU_RESPONSE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
@@ -25,11 +26,10 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
     _class: JClass,
     response_apdu: JByteArray,
 ) {
-    unsafe {
-        APDU_RESPONSE.clear();
-        APDU_RESPONSE.extend_from_slice(&env.convert_byte_array(&response_apdu).unwrap()[..]);
-        trace!("RESPONSE: {:02X?}", APDU_RESPONSE);
-    }
+    let mut apdu_response = APDU_RESPONSE.lock().unwrap();
+    apdu_response.clear();
+    apdu_response.extend_from_slice(&env.convert_byte_array(&response_apdu).unwrap()[..]);
+    trace!("RESPONSE: {:02X?}", apdu_response);
 }
 
 struct JavaSmartCardConnection {}
@@ -38,22 +38,20 @@ impl ApduInterface for JavaSmartCardConnection {
     fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, ()> {
         trace!("CALLING {:02X?}", apdu);
 
-        let mut output: Vec<u8> = Vec::new();
+        let mut env = JVM.get().unwrap().get_env().unwrap();
+        // Clone the reference so the lock is not held during the Java callback
+        let callback = CALLBACK.lock().unwrap().clone().unwrap();
 
-        unsafe {
-            let request_apdu = ENV.as_ref().unwrap().byte_array_from_slice(apdu).unwrap();
-            ENV.as_mut()
-                .unwrap()
-                .call_method(
-                    CALLBACK.as_ref().unwrap(),
-                    "sendApduRequest",
-                    "([B)V",
-                    &[JValue::Object(&request_apdu)],
-                )
-                .unwrap();
+        let request_apdu = env.byte_array_from_slice(apdu).unwrap();
+        env.call_method(
+            &callback,
+            "sendApduRequest",
+            "([B)V",
+            &[JValue::Object(&request_apdu)],
+        )
+        .unwrap();
 
-            output.extend_from_slice(&APDU_RESPONSE[..]);
-        }
+        let output = APDU_RESPONSE.lock().unwrap().clone();
 
         Ok(output)
     }
@@ -184,78 +182,74 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
 
     init_logging().unwrap();
 
-    unsafe {
-        // Setup JVM and callback points to Simulator class
+    // Setup JVM and callback points to Simulator class
 
-        ENV = Some(env);
+    let _ = JVM.set(env.get_java_vm().unwrap());
 
-        let _jvm = ENV.as_ref().unwrap().get_java_vm().unwrap();
+    *CALLBACK.lock().unwrap() = Some(env.new_global_ref(callback).unwrap());
 
-        CALLBACK = Some(ENV.as_ref().unwrap().new_global_ref(callback).unwrap());
+    let mut connection = EmvConnection::new("../config/settings.yaml").unwrap();
+    let smart_card_connection = JavaSmartCardConnection {};
+    connection.interface = Some(&smart_card_connection);
+    setup_connection(&mut connection).unwrap();
 
-        let mut connection = EmvConnection::new("../config/settings.yaml").unwrap();
-        let smart_card_connection = JavaSmartCardConnection {};
-        connection.interface = Some(&smart_card_connection);
-        setup_connection(&mut connection).unwrap();
+    // Setup the PSE ICC data
+    ApduRequestResponse::execute_setup_apdus(
+        &mut connection,
+        "../config/card_setup_pse_apdus.yaml",
+    )
+    .unwrap();
 
-        // Setup the PSE ICC data
-        ApduRequestResponse::execute_setup_apdus(
-            &mut connection,
-            "../config/card_setup_pse_apdus.yaml",
-        )
+    let applications = connection
+        .handle_select_payment_system_environment()
         .unwrap();
 
-        let applications = connection
-            .handle_select_payment_system_environment()
-            .unwrap();
+    // Setup the app ICC data
+    ApduRequestResponse::execute_setup_apdus(
+        &mut connection,
+        "../config/card_setup_app_apdus.yaml",
+    )
+    .unwrap();
 
-        // Setup the app ICC data
-        ApduRequestResponse::execute_setup_apdus(
-            &mut connection,
-            "../config/card_setup_app_apdus.yaml",
-        )
+    let application = &applications[0];
+    connection
+        .handle_select_payment_application(application)
         .unwrap();
 
-        let application = &applications[0];
-        connection
-            .handle_select_payment_application(application)
-            .unwrap();
+    connection.start_transaction(&application).unwrap();
 
-        connection.start_transaction(&application).unwrap();
+    connection.process_settings().unwrap();
 
-        connection.process_settings().unwrap();
+    let search_tag = b"\x9f\x36";
+    connection.handle_get_data(&search_tag[..]).unwrap();
 
-        let search_tag = b"\x9f\x36";
-        connection.handle_get_data(&search_tag[..]).unwrap();
+    connection.handle_card_verification_methods().unwrap();
 
-        connection.handle_card_verification_methods().unwrap();
+    connection.handle_terminal_risk_management().unwrap();
 
-        connection.handle_terminal_risk_management().unwrap();
+    connection.handle_offline_data_authentication().unwrap();
 
-        connection.handle_offline_data_authentication().unwrap();
+    connection.handle_terminal_action_analysis().unwrap();
 
-        connection.handle_terminal_action_analysis().unwrap();
+    if let CryptogramType::AuthorisationRequestCryptogram =
+        connection.handle_1st_generate_ac().unwrap()
+    {
+        // Online authorisation response from the issuer
+        let arqc = connection.get_tag_value("9F26").unwrap().clone();
+        let atc = connection.get_tag_value("9F36").unwrap().clone();
+        connection.add_tag("8A", AUTHORISATION_RESPONSE_CODE.to_vec());
+        connection.add_tag("91", issuer_authentication_data(&arqc, &atc));
 
-        if let CryptogramType::AuthorisationRequestCryptogram =
-            connection.handle_1st_generate_ac().unwrap()
-        {
-            // Online authorisation response from the issuer
-            let arqc = connection.get_tag_value("9F26").unwrap().clone();
-            let atc = connection.get_tag_value("9F36").unwrap().clone();
-            connection.add_tag("8A", AUTHORISATION_RESPONSE_CODE.to_vec());
-            connection.add_tag("91", issuer_authentication_data(&arqc, &atc));
-
-            connection.handle_issuer_authentication_data().unwrap();
-            connection.handle_2nd_generate_ac().unwrap();
-        }
-
-        // Consume logs that the card gathered
-        ApduRequestResponse::execute_setup_apdus(
-            &mut connection,
-            "../config/card_log_consume_apdus.yaml",
-        )
-        .unwrap();
+        connection.handle_issuer_authentication_data().unwrap();
+        connection.handle_2nd_generate_ac().unwrap();
     }
+
+    // Consume logs that the card gathered
+    ApduRequestResponse::execute_setup_apdus(
+        &mut connection,
+        "../config/card_log_consume_apdus.yaml",
+    )
+    .unwrap();
 }
 
 #[cfg(test)]
