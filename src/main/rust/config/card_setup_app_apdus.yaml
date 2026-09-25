@@ -18,6 +18,29 @@
 # Use response template 2 (tag 77)
 - req: '80 00 00 02 02 00 77'
   res: '90 00'
+# ICC Application Cryptogram Master Key MK_AC (double length 3DES). When set, Application Cryptogram (9F26)
+# is generated with EMV Book 2 Common Session Key Derivation (A1.3.1) and ISO/IEC 9797-1 MAC Algorithm 3 (A1.2.1)
+# over CDOL related data || AIP || ATC. Clear the key with empty data ('80 00 00 07 00') to use the static 9F26 tag value.
+# Settings flags (80 00 00 03) value '00 02' also includes Issuer Application Data (9F10) as in Common Core Definitions ('00 03' keeps random enabled).
+- req: '80 00 00 07 10 01 23 45 67 89 AB CD EF FE DC BA 98 76 54 32 10'
+  res: '90 00'
+# ARPC method for issuer authentication (EMV Book 2, 8.2) in EXTERNAL AUTHENTICATE or tag 91 in CDOL2:
+# '01' = Method 1, Issuer Authentication Data ARPC (8) || ARC (2)
+# '02' = Method 2, Issuer Authentication Data ARPC (4) || CSU (4) || Proprietary Authentication Data (0-8)
+# Second GENERATE AC returns AAC when issuer authentication has failed.
+- req: '80 00 00 08 01 01'
+  res: '90 00'
+# ICC Secure Messaging for Integrity Master Key MK_SMI (double length 3DES) for issuer script commands.
+# Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2.
+- req: '80 00 00 09 10 89 AB CD EF 01 23 45 67 76 54 32 10 FE DC BA 98'
+  res: '90 00'
+# Relay Resistance Protocol timing (EMV Contactless Book C-2, 3.10 and 5.3), in units of hundreds of microseconds:
+# Min Time For Processing Relay Resistance APDU (2) || Max Time For Processing Relay Resistance APDU (2) ||
+# Device Estimated Transmission Time For Relay Resistance R-APDU (2). Default is min 0.0 ms, max 20.0 ms, transmission 1.8 ms.
+# EXCHANGE RELAY RESISTANCE DATA ('80 EA') is supported when AIP (tag 82) byte 2 bit 1 is set, e.g. '80 01 00 82 02 3C 01'.
+# Relay resistance data of the latest exchange is then included in the CDA signature (C-2, Table 6.8).
+- req: '80 00 00 0A 06 00 00 00 C8 00 12'
+  res: '90 00'
 # Setup tag templates
 - req: '80 02 00 01 04 00 82 00 94'
   res: '90 00'
@@ -115,6 +138,7 @@
   res: '90 00'
 - req: '80 01 9F 27 01 80'
   res: '90 00'
+# Static Application Cryptogram, used only when the Application Cryptogram Master Key is not set
 - req: '80 01 9F 26 08 B0 18 91 01 D1 14 16 C1'
   res: '90 00'
 - req: '80 01 9F 10 07 06 01 0A 03 A4 A0 02'

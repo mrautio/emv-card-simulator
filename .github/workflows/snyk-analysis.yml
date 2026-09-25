@@ -15,7 +15,7 @@ jobs:
     #if: false # disable, due to too many errors
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@93ea575cb5d8a053eaa0ac8fa3b40d7e05a33cc8 # pin@v3.1.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # pin@v7.0.1
         with:
           submodules: true
       - name: Build a Docker image
@@ -24,7 +24,7 @@ jobs:
         # Snyk can be used to break the build when it detects vulnerabilities.
         # In this case we want to upload the issues to GitHub Code Scanning
         continue-on-error: true
-        uses: snyk/actions/docker@4259725f0dd662aa764d82760cca8959888a595c # pin@master
+        uses: snyk/actions/docker@12140f4059e244892ae643824a95459a102120dd # pin@master
         env:
           # In order to use the Snyk Action you will need to have a Snyk API token.
           # More details in https://github.com/snyk/actions#getting-your-snyk-token
@@ -34,6 +34,6 @@ jobs:
           image: emvcard-builder
           args: --file=Dockerfile
       - name: Upload result to GitHub Code Scanning
-        uses: github/codeql-action/upload-sarif@e095058bfa09de8070f94e98f5dc059531bc6235 # pin@v1
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # pin@v4.38.2
         with:
           sarif_file: snyk.sarif
