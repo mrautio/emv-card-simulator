@@ -27,6 +27,19 @@ public class TagTemplate {
     }
 
     /**
+     * Set tag list as a copy of another template, replacing tag fromTagId with toTagId.
+     */
+    public void setDataReplacingTag(TagTemplate src, short fromTagId, short toTagId) {
+        setData(src.getData(), (short) 0, src.getLength());
+
+        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += (short) 2) {
+            if (Util.getShort(data, i) == fromTagId) {
+                Util.setShort(data, i, toTagId);
+            }
+        }
+    }
+
+    /**
      * Get BER-TLV EMV tag list.
      */
     public byte[] getData() {
@@ -44,10 +57,21 @@ public class TagTemplate {
      * Retrieve all tag data from EmvTag and copy to destination array as BER-TLV encoded.
      */
     public short expandTlvToArray(byte[] dst, short dstOffset) {
+        return expandTlvToArray(dst, dstOffset, (short) 0);
+    }
+
+    /**
+     * Retrieve all tag data except skipTagId from EmvTag and copy to destination array as BER-TLV encoded.
+     */
+    public short expandTlvToArray(byte[] dst, short dstOffset, short skipTagId) {
 
         short dataOffset = dstOffset;
         for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += (short) 2) {
             short tagId = Util.getShort(data, i);
+
+            if (skipTagId != 0 && tagId == skipTagId) {
+                continue;
+            }
 
             EmvTag tag = EmvTag.findTag(tagId);
 
