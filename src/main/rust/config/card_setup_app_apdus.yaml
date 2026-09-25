@@ -34,6 +34,13 @@
 # Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2.
 - req: '80 00 00 09 10 89 AB CD EF 01 23 45 67 76 54 32 10 FE DC BA 98'
   res: '90 00'
+# Relay Resistance Protocol timing (EMV Contactless Book C-2, 3.10 and 5.3), in units of hundreds of microseconds:
+# Min Time For Processing Relay Resistance APDU (2) || Max Time For Processing Relay Resistance APDU (2) ||
+# Device Estimated Transmission Time For Relay Resistance R-APDU (2). Default is min 0.0 ms, max 20.0 ms, transmission 1.8 ms.
+# EXCHANGE RELAY RESISTANCE DATA ('80 EA') is supported when AIP (tag 82) byte 2 bit 1 is set, e.g. '80 01 00 82 02 3C 01'.
+# Relay resistance data of the latest exchange is then included in the CDA signature (C-2, Table 6.8).
+- req: '80 00 00 0A 06 00 00 00 C8 00 12'
+  res: '90 00'
 # Setup tag templates
 - req: '80 02 00 01 04 00 82 00 94'
   res: '90 00'

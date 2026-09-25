@@ -34,6 +34,7 @@ public class PaymentApplication extends EmvApplet {
     private static final short OFFSET_STATE = (short) 0;
     private static final short OFFSET_EXTERNAL_AUTHENTICATE_DONE = (short) 1;
     private static final short OFFSET_ISSUER_AUTHENTICATION_FAILED = (short) 2;
+    private static final short OFFSET_RELAY_RESISTANCE_PERFORMED = (short) 3;
 
     // ARPC generation methods (EMV Book 2, 8.2 Issuer Authentication)
     private static final byte ARPC_METHOD_1 = (byte) 0x01;
@@ -81,6 +82,16 @@ public class PaymentApplication extends EmvApplet {
     private byte[] secureMessagingMacChain;
     // APPLICATION BLOCK state (EMV Book 3, 6.5.1)
     private boolean applicationBlocked = false;
+
+    // Relay Resistance Protocol (EMV Contactless Book C-2, 3.10 and 5.3)
+    private static final short RELAY_RESISTANCE_ENTROPY_LENGTH = (short) 4;
+    private static final short RELAY_RESISTANCE_TIMING_LENGTH = (short) 6;
+    private static final short RELAY_RESISTANCE_DATA_LENGTH = (short) (2 * RELAY_RESISTANCE_ENTROPY_LENGTH + RELAY_RESISTANCE_TIMING_LENGTH);
+    // Min Time For Processing Relay Resistance APDU (DF8303), Max Time For Processing Relay Resistance APDU (DF8304) and
+    // Device Estimated Transmission Time For Relay Resistance R-APDU (DF8305), in units of hundreds of microseconds
+    private byte[] relayResistanceTiming;
+    // Terminal Relay Resistance Entropy (DF8301) || Device Relay Resistance Entropy (DF8302) || timing, signed in CDA
+    private byte[] relayResistanceData;
 
     protected void processSetSettings(APDU apdu, byte[] buf, short dataLength) {
         short settingsId = Util.getShort(buf, ISO7816.OFFSET_P1);
@@ -163,6 +174,14 @@ public class PaymentApplication extends EmvApplet {
             case 0x0009:
                 secureMessagingMacMasterKey = setMasterKey(secureMessagingMacMasterKey, buf, dataLength);
                 break;
+            // RELAY RESISTANCE TIMING: Min Time For Processing Relay Resistance APDU (2), Max Time For Processing Relay Resistance APDU (2),
+            // Device Estimated Transmission Time For Relay Resistance R-APDU (2)
+            case 0x000A:
+                if (dataLength != RELAY_RESISTANCE_TIMING_LENGTH) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                Util.arrayCopy(buf, (short) ISO7816.OFFSET_CDATA, relayResistanceTiming, (short) 0, RELAY_RESISTANCE_TIMING_LENGTH);
+                break;
             default:
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
@@ -211,9 +230,13 @@ public class PaymentApplication extends EmvApplet {
 
         tag9f4cDynamicNumber = JCSystem.makeTransientByteArray((short) 3, JCSystem.CLEAR_ON_DESELECT);
 
-        transactionState = JCSystem.makeTransientByteArray((short) 3, JCSystem.CLEAR_ON_DESELECT);
+        transactionState = JCSystem.makeTransientByteArray((short) 4, JCSystem.CLEAR_ON_DESELECT);
         firstApplicationCryptogram = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
         secureMessagingMacChain = JCSystem.makeTransientByteArray((short) 8, JCSystem.CLEAR_ON_DESELECT);
+        relayResistanceData = JCSystem.makeTransientByteArray(RELAY_RESISTANCE_DATA_LENGTH, JCSystem.CLEAR_ON_DESELECT);
+
+        // Default timing: min 0.0 ms, max 20.0 ms, estimated transmission time 1.8 ms
+        relayResistanceTiming = new byte[] { (byte) 0x00, (byte) 0x00, (byte) 0x00, (byte) 0xC8, (byte) 0x00, (byte) 0x12 };
 
         pdolData = new byte[255];
         cdol1Data = new byte[255];
@@ -658,10 +681,15 @@ public class PaymentApplication extends EmvApplet {
         tmpBuffer[0] = (byte) 0x6A;
         tmpBuffer[1] = (byte) 0x05;
         tmpBuffer[2] = (byte) 0x01; // SHA-1 hash algo
+        final boolean relayResistancePerformed = transactionState[OFFSET_RELAY_RESISTANCE_PERFORMED] != (byte) 0x00;
         tmpBuffer[3] = (byte) (1 + dynamicNumberLength + 1 + 8 + 20);
+        if (relayResistancePerformed) {
+            tmpBuffer[3] += (byte) RELAY_RESISTANCE_DATA_LENGTH;
+        }
         tmpBuffer[(short) (signedDataSize - 1)] = (byte) 0xBC;
 
-        // ICC Dynamic Data: ICC Dynamic Number, Cryptogram Information Data, Application Cryptogram, Transaction Data Hash Code
+        // ICC Dynamic Data: ICC Dynamic Number, Cryptogram Information Data, Application Cryptogram, Transaction Data Hash Code,
+        // and relay resistance data when the Relay Resistance Protocol was performed (EMV Contactless Book C-2, Table 6.8)
         short offset = (short) 4;
         tmpBuffer[offset] = (byte) dynamicNumberLength;
         offset += (short) 1;
@@ -687,7 +715,11 @@ public class PaymentApplication extends EmvApplet {
         if (secondGenerateAc && cdol2DataLength > 0) {
             shaMessageDigest.update(cdol2Data, (short) 0, cdol2DataLength);
         }
-        shaMessageDigest.doFinal(buf, (short) 0, responseDataLength, tmpBuffer, offset);
+        offset += shaMessageDigest.doFinal(buf, (short) 0, responseDataLength, tmpBuffer, offset);
+
+        if (relayResistancePerformed) {
+            Util.arrayCopyNonAtomic(relayResistanceData, (short) 0, tmpBuffer, offset, RELAY_RESISTANCE_DATA_LENGTH);
+        }
 
         short checksumStartIndex = (short) (signedDataSize - 21);
         shaMessageDigest.reset();
@@ -801,6 +833,59 @@ public class PaymentApplication extends EmvApplet {
         transactionState[OFFSET_STATE] = STATE_GPO_DONE;
         transactionState[OFFSET_EXTERNAL_AUTHENTICATE_DONE] = (byte) 0x00;
         transactionState[OFFSET_ISSUER_AUTHENTICATION_FAILED] = (byte) 0x00;
+        transactionState[OFFSET_RELAY_RESISTANCE_PERFORMED] = (byte) 0x00;
+    }
+
+    private boolean isRelayResistanceProtocolSupported() {
+        // AIP byte 2 bit 1: Relay resistance protocol is supported (EMV Contactless Book C-2, A.1.16)
+        EmvTag applicationInterchangeProfile = EmvTag.findTag((short) 0x0082);
+        return applicationInterchangeProfile != null && applicationInterchangeProfile.getLength() == (byte) 2
+            && (applicationInterchangeProfile.getData()[1] & (byte) 0x01) != 0;
+    }
+
+    /**
+     * EXCHANGE RELAY RESISTANCE DATA (EMV Contactless Book C-2, 5.3). The terminal times this command, and may repeat it
+     * with a new Terminal Relay Resistance Entropy. Response is format 1:
+     * '80' '0A' Device Relay Resistance Entropy (4) || Min Time (2) || Max Time (2) || Device Estimated Transmission Time (2)
+     */
+    private void processExchangeRelayResistanceData(APDU apdu, byte[] buf, short dataLength) {
+        if (!isRelayResistanceProtocolSupported()) {
+            commandNotSupported(CMD_EXCHANGE_RELAY_RESISTANCE_DATA);
+        }
+
+        if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x0000) {
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        if (dataLength != RELAY_RESISTANCE_ENTROPY_LENGTH) {
+            EmvApplet.logAndThrow(ISO7816.SW_WRONG_LENGTH);
+        }
+
+        // Between GET PROCESSING OPTIONS and the first GENERATE AC
+        if (transactionState[OFFSET_STATE] != STATE_GPO_DONE) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        // Terminal Relay Resistance Entropy
+        Util.arrayCopyNonAtomic(buf, (short) ISO7816.OFFSET_CDATA, relayResistanceData, (short) 0, RELAY_RESISTANCE_ENTROPY_LENGTH);
+
+        // Device Relay Resistance Entropy, fresh for each exchange
+        randomData.generateData(relayResistanceData, RELAY_RESISTANCE_ENTROPY_LENGTH, RELAY_RESISTANCE_ENTROPY_LENGTH);
+        if (!useRandom) {
+            Util.arrayFillNonAtomic(relayResistanceData, RELAY_RESISTANCE_ENTROPY_LENGTH, RELAY_RESISTANCE_ENTROPY_LENGTH, (byte) 0xAB);
+        }
+
+        Util.arrayCopyNonAtomic(relayResistanceTiming, (short) 0,
+            relayResistanceData, (short) (2 * RELAY_RESISTANCE_ENTROPY_LENGTH), RELAY_RESISTANCE_TIMING_LENGTH);
+
+        transactionState[OFFSET_RELAY_RESISTANCE_PERFORMED] = (byte) 0x01;
+
+        short responseLength = (short) (RELAY_RESISTANCE_DATA_LENGTH - RELAY_RESISTANCE_ENTROPY_LENGTH);
+        tmpBuffer[0] = (byte) 0x80;
+        tmpBuffer[1] = (byte) responseLength;
+        Util.arrayCopyNonAtomic(relayResistanceData, RELAY_RESISTANCE_ENTROPY_LENGTH, tmpBuffer, (short) 2, responseLength);
+
+        sendResponse(apdu, buf, tmpBuffer, (short) 0, (short) (2 + responseLength));
     }
 
     /**
@@ -1105,6 +1190,9 @@ public class PaymentApplication extends EmvApplet {
                 break;
             case CMD_EXTERNAL_AUTHENTICATE:
                 externalAuthenticate(apdu, buf, dataLength);
+                break;
+            case CMD_EXCHANGE_RELAY_RESISTANCE_DATA:
+                processExchangeRelayResistanceData(apdu, buf, dataLength);
                 break;
             case CMD_APPLICATION_BLOCK:
             case CMD_APPLICATION_UNBLOCK:

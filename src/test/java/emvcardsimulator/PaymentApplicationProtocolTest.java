@@ -913,6 +913,14 @@ public class PaymentApplicationProtocolTest {
 
     private void assertCombinedDataAuthentication(byte[] template, byte cryptogramType, byte[] applicationCryptogram, byte[] transactionData)
         throws NoSuchAlgorithmException {
+        assertCombinedDataAuthentication(template, cryptogramType, applicationCryptogram, transactionData, new byte[0]);
+    }
+
+    /**
+     * Check CDA signature, relayResistanceData is empty when the Relay Resistance Protocol was not performed.
+     */
+    private void assertCombinedDataAuthentication(byte[] template, byte cryptogramType, byte[] applicationCryptogram, byte[] transactionData,
+        byte[] relayResistanceData) throws NoSuchAlgorithmException {
         // Application Cryptogram is inside the signature
         assertEquals(null, findTag(template, 0x9F26));
         assertArrayEquals(new byte[] { cryptogramType }, findTag(template, 0x9F27));
@@ -923,13 +931,15 @@ public class PaymentApplicationProtocolTest {
         assertEquals((byte) 0xBC, recovered[length - 1]);
 
         // ICC Dynamic Data
-        assertEquals(1 + 3 + 1 + 8 + 20, recovered[3]);
+        assertEquals(1 + 3 + 1 + 8 + 20 + relayResistanceData.length, recovered[3]);
         assertEquals(3, recovered[4]);
         assertEquals(cryptogramType, recovered[8]);
         assertArrayEquals(applicationCryptogram, Arrays.copyOfRange(recovered, 9, 17));
 
         byte[] transactionDataHashCode = sha1(transactionData, responseTlvsWithoutSdad(template));
         assertArrayEquals(transactionDataHashCode, Arrays.copyOfRange(recovered, 17, 37));
+        // EMV Contactless Book C-2, Table 6.8 ICC Dynamic Data (RRP)
+        assertArrayEquals(relayResistanceData, Arrays.copyOfRange(recovered, 37, 37 + relayResistanceData.length));
 
         byte[] hash = sha1(Arrays.copyOfRange(recovered, 1, length - 21), hex("01 23 45 67"));
         assertArrayEquals(hash, Arrays.copyOfRange(recovered, length - 21, length - 1));
@@ -970,6 +980,106 @@ public class PaymentApplicationProtocolTest {
         assertArrayEquals(hex("00"), findTag(response.getData(), 0x9F27));
         assertArrayEquals(applicationCryptogram(hex(ATC), hex(CDOL1_DATA), hex(AIP), hex(ATC)), findTag(response.getData(), 0x9F26));
         assertTrue(findTag(response.getData(), 0x9F4B) == null);
+    }
+
+    // AIP of the test profile with 'Relay resistance protocol is supported'
+    private static final String AIP_RRP = "3C01";
+    // Default relay resistance timing: min 0.0 ms, max 20.0 ms, Device Estimated Transmission Time 1.8 ms
+    private static final String RELAY_RESISTANCE_TIMING = "0000 00C8 0012";
+
+    private static void enableRelayResistanceProtocol() throws CardException {
+        assertSw(0x9000, send("80 01 00 82 02 " + AIP_RRP));
+    }
+
+    /**
+     * EXCHANGE RELAY RESISTANCE DATA, returns the Device Relay Resistance Entropy after checking the response format.
+     */
+    private static byte[] exchangeRelayResistanceData(String terminalEntropy, String timing) throws CardException {
+        ResponseAPDU response = send("80 EA 00 00 04 " + terminalEntropy + " 00");
+        assertSw(0x9000, response);
+        byte[] data = response.getData();
+        assertArrayEquals(hex("80 0A"), Arrays.copyOfRange(data, 0, 2));
+        assertEquals(12, data.length);
+        assertArrayEquals(hex(timing), Arrays.copyOfRange(data, 6, 12));
+        return Arrays.copyOfRange(data, 2, 6);
+    }
+
+    @Test
+    public void relayResistanceProtocolNotSupportedTest() throws CardException {
+        // AIP of the test profile does not indicate RRP
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        assertSw(ISO7816.SW_INS_NOT_SUPPORTED, send("80 EA 00 00 04 01 23 45 67 00"));
+    }
+
+    @Test
+    public void exchangeRelayResistanceDataTest() throws CardException {
+        enableRelayResistanceProtocol();
+
+        // Only after GET PROCESSING OPTIONS
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 EA 00 00 04 01 23 45 67 00"));
+
+        ResponseAPDU response = send("80 A8 00 00 02 83 00 00");
+        assertSw(0x9000, response);
+        assertArrayEquals(hex(AIP_RRP), findTag(response.getData(), 0x82));
+
+        assertSw(ISO7816.SW_INCORRECT_P1P2, send("80 EA 01 00 04 01 23 45 67 00"));
+        assertSw(ISO7816.SW_WRONG_LENGTH, send("80 EA 00 00 03 01 23 45 00"));
+        assertSw(ISO7816.SW_WRONG_LENGTH, send("80 EA 00 00 05 01 23 45 67 89 00"));
+
+        // Terminal may retry with a new entropy, the card responds with a new Device Relay Resistance Entropy
+        byte[] first = exchangeRelayResistanceData("01 23 45 67", RELAY_RESISTANCE_TIMING);
+        byte[] second = exchangeRelayResistanceData("89 AB CD EF", RELAY_RESISTANCE_TIMING);
+        assertTrue(!Arrays.equals(first, second));
+
+        assertSw(0x9000, send("80 AE 80 00 1D " + CDOL1_DATA + " 00"));
+
+        // Not after GENERATE AC
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 EA 00 00 04 01 23 45 67 00"));
+    }
+
+    @Test
+    public void relayResistanceTimingSettingTest() throws CardException {
+        enableRelayResistanceProtocol();
+
+        assertSw(ISO7816.SW_WRONG_LENGTH, send("80 00 00 0A 04 00 10 00 50"));
+        assertSw(0x9000, send("80 00 00 0A 06 00 10 00 50 00 0C"));
+
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        exchangeRelayResistanceData("01 23 45 67", "0010 0050 000C");
+    }
+
+    @Test
+    public void relayResistanceDeviceEntropyWithoutRandomTest() throws CardException {
+        enableRelayResistanceProtocol();
+        assertSw(0x9000, send("80 00 00 03 02 00 00"));
+
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        assertArrayEquals(hex("AB AB AB AB"), exchangeRelayResistanceData("01 23 45 67", RELAY_RESISTANCE_TIMING));
+    }
+
+    @Test
+    public void combinedDataAuthenticationWithRelayResistanceTest() throws CardException, GeneralSecurityException {
+        enableRelayResistanceProtocol();
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+
+        // Relay resistance data of the latest exchange is signed, its Terminal Relay Resistance Entropy is the Unpredictable Number
+        exchangeRelayResistanceData("89 AB CD EF", RELAY_RESISTANCE_TIMING);
+        byte[] deviceEntropy = exchangeRelayResistanceData("01 23 45 67", RELAY_RESISTANCE_TIMING);
+
+        ResponseAPDU response = send("80 AE 90 00 1D " + CDOL1_DATA + " 00");
+        assertSw(0x9000, response);
+        assertCombinedDataAuthentication(response.getData(), (byte) 0x80,
+            applicationCryptogram(hex(ATC), hex(CDOL1_DATA), hex(AIP_RRP), hex(ATC)), hex(CDOL1_DATA),
+            concat(hex("01 23 45 67"), deviceEntropy, hex(RELAY_RESISTANCE_TIMING)));
+
+        // Relay resistance data is not signed in the next transaction without the exchange
+        assertSw(0x9000, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        byte[] atc = hex("00 F2");
+        response = send("80 AE 90 00 1D " + CDOL1_DATA + " 00");
+        assertSw(0x9000, response);
+        assertCombinedDataAuthentication(response.getData(), (byte) 0x80,
+            applicationCryptogram(atc, hex(CDOL1_DATA), hex(AIP_RRP), atc), hex(CDOL1_DATA));
     }
 
     @Test

@@ -57,6 +57,8 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_GET_PROCESSING_OPTIONS = (short) 0x80A8;
     protected static final short CMD_GENERATE_AC = (short) 0x80AE;
     protected static final short CMD_EXTERNAL_AUTHENTICATE = (short) 0x0082;
+    // Relay Resistance Protocol (EMV Contactless Book C-2, 5.3)
+    protected static final short CMD_EXCHANGE_RELAY_RESISTANCE_DATA = (short) 0x80EA;
     // Post-issuance commands with secure messaging format 1 (EMV Book 3, 6.5)
     protected static final short CMD_APPLICATION_BLOCK = (short) 0x8C1E;
     protected static final short CMD_APPLICATION_UNBLOCK = (short) 0x8C18;
@@ -188,6 +190,7 @@ public abstract class EmvApplet extends Applet {
             case CMD_GET_PROCESSING_OPTIONS:
             case CMD_GENERATE_AC:
             case CMD_EXTERNAL_AUTHENTICATE:
+            case CMD_EXCHANGE_RELAY_RESISTANCE_DATA:
             case CMD_APPLICATION_BLOCK:
             case CMD_APPLICATION_UNBLOCK:
             case CMD_CARD_BLOCK:
