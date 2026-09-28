@@ -41,6 +41,20 @@
 # Relay resistance data of the latest exchange is then included in the CDA signature (C-2, Table 6.8).
 - req: '80 00 00 0A 06 00 00 00 C8 00 12'
   res: '90 00'
+# Optional settings, see PaymentApplication.processSetSettings:
+# Flags ('80 00 00 03 02 00 xx'), xx is a sum of: '01' random, '02' IAD in AC, '04' qVSDC (Application Cryptogram and fDDA in
+# GET PROCESSING OPTIONS response, cryptogram type from Terminal Transaction Qualifiers 9F66 in PDOL), '08' card risk management.
+# Card risk management uses Lower/Upper Consecutive Offline Limit tags 9F14/9F23, Offline Accumulator Balance 9F50 and
+# cumulative offline amount limits: '80 00 00 0E 0C' || lower (6) || upper (6), n12 like 9F02, zero is no limit.
+# Card Verification Results in Issuer Application Data 9F10: '80 00 00 0D 02' || format || offset,
+# format '01' Common Core Definitions CVR (5 bytes), '02' Visa CVR ('03' + 3 bytes), e.g. '80 00 00 0D 02 02 03' for this profile.
+# ICC PIN Encipherment key for enciphered offline PIN: modulus '80 00 00 0F', private exponent '80 00 00 10', empty modulus clears it.
+# Mag-stripe mode COMPUTE CRYPTOGRAPHIC CHECKSUM: KD_CVC3 '80 00 00 0B 10' || key, IVCVC3 Track1 (2) || Track2 (2) '80 00 00 0C 04',
+# UDOL tag 9F69 (default '9F 6A 04'), response template id 7 (default 9F61 9F60 9F36).
+# PUT DATA writable tags (Data Storage, balance): '80 00 00 11' || tag list, e.g. '80 00 00 11 04 DF 61 9F 50'.
+# RECOVER AC of a torn first GENERATE AC is supported when DRDOL tag 9F51 exists.
+# Transaction log is written when Log Entry 9F4D (SFI, number of records) and Log Format 9F4F exist.
+# Tags of three bytes are set with P1 P2 '00 00' and the tag before the value, e.g. '80 01 00 00 05 DF 81 01 AA BB'.
 # Setup tag templates
 - req: '80 02 00 01 04 00 82 00 94'
   res: '90 00'

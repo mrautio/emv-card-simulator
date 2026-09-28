@@ -41,6 +41,8 @@ If you have a SmartCard reader and a Global Platform compliant SmartCard, then y
 ```sh
 # Deploy payment selection app to a JavaCard 2 SmartCard 
 gradle deployPse -Pjc_version=2.2.2
+# Deploy contactless payment selection app (PPSE) to a JavaCard 2 SmartCard
+gradle deployPpse -Pjc_version=2.2.2
 # Deploy the payment app to a JavaCard 2 SmartCard 
 gradle deployPaymentApp -Pjc_version=2.2.2
 ```

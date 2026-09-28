@@ -1,22 +1,29 @@
 package emvcardsimulator;
 
+import static emvcardsimulator.EmvTestUtil.assertSw;
+import static emvcardsimulator.EmvTestUtil.concat;
+import static emvcardsimulator.EmvTestUtil.deriveSessionKey;
+import static emvcardsimulator.EmvTestUtil.des;
+import static emvcardsimulator.EmvTestUtil.findTag;
+import static emvcardsimulator.EmvTestUtil.hex;
+import static emvcardsimulator.EmvTestUtil.macAlgorithm3;
+import static emvcardsimulator.EmvTestUtil.pad;
+import static emvcardsimulator.EmvTestUtil.responseTlvsWithoutSdad;
+import static emvcardsimulator.EmvTestUtil.retailMac;
+import static emvcardsimulator.EmvTestUtil.send;
+import static emvcardsimulator.EmvTestUtil.sha1;
+import static emvcardsimulator.EmvTestUtil.toHex;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
 import java.math.BigInteger;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
-import java.util.List;
 import javacard.framework.ISO7816;
 import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 import javax.smartcardio.CardException;
 import javax.smartcardio.ResponseAPDU;
 import org.junit.jupiter.api.AfterEach;
@@ -30,7 +37,7 @@ public class PaymentApplicationProtocolTest {
     private static final byte[] APPLET_AID = new byte[] { (byte) 0xAF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0x12, (byte) 0x34 };
     private static final String SETUP_FILE = "../config/card_setup_app_apdus.yaml";
 
-    private static final BigInteger ICC_PUBLIC_EXPONENT = BigInteger.valueOf(3);
+    private static final BigInteger ICC_PUBLIC_EXPONENT = EmvTestUtil.ICC_PUBLIC_EXPONENT;
 
     // CDOL1 of the test profile: 9F02 06, 9F03 06, 9F1A 02, 95 05, 5F2A 02, 9A 03, 9C 01, 9F37 04
     private static final String CDOL1_DATA = "000000000001 000000000000 0246 0000000000 0978 200724 21 01234567";
@@ -56,93 +63,6 @@ public class PaymentApplicationProtocolTest {
 
     private BigInteger iccModulus;
 
-    private static byte[] hex(String data) {
-        String compact = data.replace(" ", "");
-        byte[] result = new byte[compact.length() / 2];
-        for (int i = 0; i < result.length; i++) {
-            result[i] = (byte) Integer.parseInt(compact.substring(i * 2, i * 2 + 2), 16);
-        }
-        return result;
-    }
-
-    private static byte[] concat(byte[]... arrays) {
-        int length = 0;
-        for (byte[] array : arrays) {
-            length += array.length;
-        }
-
-        byte[] result = new byte[length];
-        int offset = 0;
-        for (byte[] array : arrays) {
-            System.arraycopy(array, 0, result, offset, array.length);
-            offset += array.length;
-        }
-        return result;
-    }
-
-    private static byte[] sha1(byte[]... arrays) throws NoSuchAlgorithmException {
-        return MessageDigest.getInstance("SHA-1").digest(concat(arrays));
-    }
-
-    private static byte[] des(int mode, byte[] key, byte[] data) throws GeneralSecurityException {
-        String algorithm = (key.length == 8) ? "DES" : "DESede";
-        byte[] cipherKey = key;
-        if (key.length == 16) {
-            // K1 || K2 || K1
-            cipherKey = concat(key, Arrays.copyOfRange(key, 0, 8));
-        }
-
-        Cipher cipher = Cipher.getInstance(algorithm + "/ECB/NoPadding");
-        cipher.init(mode, new SecretKeySpec(cipherKey, algorithm));
-        return cipher.doFinal(data);
-    }
-
-    /**
-     * Application Cryptogram Session Key, EMV Book 2 A1.3.1 Common Session Key Derivation Option.
-     */
-    private static byte[] deriveSessionKey(byte[] masterKey, byte[] diversification) throws GeneralSecurityException {
-        byte[] f1 = Arrays.copyOf(diversification, 8);
-        byte[] f2 = Arrays.copyOf(diversification, 8);
-        f1[2] = (byte) 0xF0;
-        f2[2] = (byte) 0x0F;
-        return des(Cipher.ENCRYPT_MODE, masterKey, concat(f1, f2));
-    }
-
-    /**
-     * ISO/IEC 7816-4 padding: '80' followed by '00' bytes to a multiple of 8 bytes.
-     */
-    private static byte[] pad(byte[] data) {
-        return Arrays.copyOf(concat(data, hex("80")), (data.length / 8 + 1) * 8);
-    }
-
-    /**
-     * ISO/IEC 9797-1 MAC Algorithm 3 with padding method 2, EMV Book 2 A1.2.1.
-     */
-    private static byte[] retailMac(byte[] sessionKey, byte[] message) throws GeneralSecurityException {
-        byte[] keyLeft = Arrays.copyOfRange(sessionKey, 0, 8);
-        byte[] keyRight = Arrays.copyOfRange(sessionKey, 8, 16);
-
-        return macAlgorithm3(sessionKey, pad(message));
-    }
-
-    /**
-     * ISO/IEC 9797-1 MAC Algorithm 3 over already padded data, EMV Book 2 A1.2.1 step 3.
-     */
-    private static byte[] macAlgorithm3(byte[] sessionKey, byte[] padded) throws GeneralSecurityException {
-        byte[] keyLeft = Arrays.copyOfRange(sessionKey, 0, 8);
-        byte[] keyRight = Arrays.copyOfRange(sessionKey, 8, 16);
-
-        byte[] block = new byte[8];
-        for (int offset = 0; offset < padded.length; offset += 8) {
-            for (int i = 0; i < 8; i++) {
-                block[i] ^= padded[offset + i];
-            }
-            block = des(Cipher.ENCRYPT_MODE, keyLeft, block);
-        }
-
-        return des(Cipher.ENCRYPT_MODE, keyLeft, des(Cipher.DECRYPT_MODE, keyRight, block));
-    }
-
     private static byte[] applicationCryptogram(byte[] atc, byte[]... data) throws GeneralSecurityException {
         return retailMac(deriveSessionKey(hex(AC_MASTER_KEY), atc), concat(data));
     }
@@ -163,14 +83,6 @@ public class PaymentApplicationProtocolTest {
     private static byte[] arpcMethod2(byte[] arqc, byte[] csu, byte[] proprietaryAuthenticationData) throws GeneralSecurityException {
         byte[] mac = retailMac(deriveSessionKey(hex(AC_MASTER_KEY), hex(ATC)), concat(arqc, csu, proprietaryAuthenticationData));
         return Arrays.copyOf(mac, 4);
-    }
-
-    private static String toHex(byte[] data) {
-        StringBuilder result = new StringBuilder();
-        for (byte b : data) {
-            result.append(String.format("%02X ", b));
-        }
-        return result.toString().trim();
     }
 
     /**
@@ -224,76 +136,8 @@ public class PaymentApplicationProtocolTest {
         return scriptCommand(header, "", 8);
     }
 
-    private static ResponseAPDU send(String apdu) throws CardException {
-        return SmartCard.transmitCommand(hex(apdu));
-    }
-
-    private static void assertSw(int expectedSw, ResponseAPDU response) {
-        assertEquals(String.format("%04X", expectedSw), String.format("%04X", response.getSW()));
-    }
-
-    /**
-     * Find value of a primitive tag from the response template 77.
-     */
-    private static byte[] findTag(byte[] template, int tag) {
-        int offset = (template[1] == (byte) 0x81) ? 3 : 2;
-        while (offset < template.length) {
-            int tagId = template[offset] & 0xFF;
-            offset++;
-            if ((tagId & 0x1F) == 0x1F) {
-                tagId = (tagId << 8) | (template[offset] & 0xFF);
-                offset++;
-            }
-
-            int length = template[offset] & 0xFF;
-            offset++;
-            if (length == 0x81) {
-                length = template[offset] & 0xFF;
-                offset++;
-            }
-
-            if (tagId == tag) {
-                return Arrays.copyOfRange(template, offset, offset + length);
-            }
-            offset += length;
-        }
-        return null;
-    }
-
-    /**
-     * Response template 77 data objects excluding Signed Dynamic Application Data, as BER-TLV.
-     */
-    private static byte[] responseTlvsWithoutSdad(byte[] template) {
-        byte[] result = new byte[0];
-        int offset = (template[1] == (byte) 0x81) ? 3 : 2;
-        while (offset < template.length) {
-            int start = offset;
-            int tagId = template[offset] & 0xFF;
-            offset++;
-            if ((tagId & 0x1F) == 0x1F) {
-                tagId = (tagId << 8) | (template[offset] & 0xFF);
-                offset++;
-            }
-
-            int length = template[offset] & 0xFF;
-            offset++;
-            if (length == 0x81) {
-                length = template[offset] & 0xFF;
-                offset++;
-            }
-            offset += length;
-
-            if (tagId != 0x9F4B) {
-                result = concat(result, Arrays.copyOfRange(template, start, offset));
-            }
-        }
-        return result;
-    }
-
     private byte[] recoverSignedData(byte[] signature) {
-        assertEquals(iccModulus.bitLength() / 8, signature.length);
-        byte[] recovered = new BigInteger(1, signature).modPow(ICC_PUBLIC_EXPONENT, iccModulus).toByteArray();
-        return Arrays.copyOfRange(recovered, recovered.length - signature.length, recovered.length);
+        return EmvTestUtil.recoverSignedData(iccModulus, signature);
     }
 
     private byte[] encipherPin(byte[] pinBlock, byte[] challenge) {
@@ -319,20 +163,7 @@ public class PaymentApplicationProtocolTest {
         SmartCard.connect();
         SmartCard.install(APPLET_AID, PaymentApplicationContainer.class);
 
-        List<String> lines = Files.readAllLines(Paths.get(SETUP_FILE), StandardCharsets.UTF_8);
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (!trimmed.startsWith("- req: '")) {
-                continue;
-            }
-
-            String request = trimmed.substring("- req: '".length(), trimmed.length() - 1);
-            if (request.startsWith("80 00 00 04 ")) {
-                iccModulus = new BigInteger(1, Arrays.copyOfRange(hex(request), 5, hex(request).length));
-            }
-
-            assertSw(0x9000, send(request));
-        }
+        iccModulus = EmvTestUtil.personalize(SETUP_FILE);
 
         ResponseAPDU response = send("00 A4 04 00 07 AF FF FF FF FF 12 34 00");
         assertSw(0x9000, response);

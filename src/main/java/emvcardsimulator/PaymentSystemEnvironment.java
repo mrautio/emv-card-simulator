@@ -1,7 +1,6 @@
 package emvcardsimulator;
 
 import javacard.framework.APDU;
-import javacard.framework.Applet;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
@@ -42,24 +41,12 @@ public class PaymentSystemEnvironment extends EmvApplet {
     protected void processSelect(APDU apdu, byte[] buf) {
         // Check if AID (tag 84) exists in the ICC
         if (EmvTag.findTag((short) 0x84) != null) {
-            if (tagBf0cFci != null) {
-                short length = tagBf0cFci.expandTlvToArray(tmpBuffer, (short) 0);
-                EmvTag.setTag((short) 0xBF0C, tmpBuffer, (short) 0, (byte) length);
-            }
+            // Templates without tag list keep the stored tag, e.g. FCI Issuer Discretionary Data with several Directory Entries (tag 61)
+            expandFciTemplate(tagBf0cFci, (short) 0xBF0C);
+            expandFciTemplate(tagA5Fci, (short) 0xA5);
+            expandFciTemplate(tag6fFci, (short) 0x6F);
 
-            if (tagA5Fci != null) {
-                short length = tagA5Fci.expandTlvToArray(tmpBuffer, (short) 0);
-                EmvTag.setTag((short) 0xA5, tmpBuffer, (short) 0, (byte) length);
-            }
-
-            if (tag6fFci != null) {
-                short length = tag6fFci.expandTlvToArray(tmpBuffer, (short) 0);
-                EmvTag.setTag((short) 0x6F, tmpBuffer, (short) 0, (byte) length);
-                sendResponse(apdu, buf, (short) 0x6F);
-            } else {
-                EmvApplet.logAndThrow(ISO7816.SW_APPLET_SELECT_FAILED);
-            }
-
+            sendResponse(apdu, buf, (short) 0x6F);
         } else {
             // NO PAN, we're probably in the setup phase
             EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);

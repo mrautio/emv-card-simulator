@@ -59,6 +59,10 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_EXTERNAL_AUTHENTICATE = (short) 0x0082;
     // Relay Resistance Protocol (EMV Contactless Book C-2, 5.3)
     protected static final short CMD_EXCHANGE_RELAY_RESISTANCE_DATA = (short) 0x80EA;
+    // Mag-stripe mode, torn transaction recovery and Data Storage (EMV Contactless Book C-2, 5)
+    protected static final short CMD_COMPUTE_CRYPTOGRAPHIC_CHECKSUM = (short) 0x802A;
+    protected static final short CMD_RECOVER_AC = (short) 0x80D0;
+    protected static final short CMD_PUT_DATA_PLAIN = (short) 0x80DA;
     // Post-issuance commands with secure messaging format 1 (EMV Book 3, 6.5)
     protected static final short CMD_APPLICATION_BLOCK = (short) 0x8C1E;
     protected static final short CMD_APPLICATION_UNBLOCK = (short) 0x8C18;
@@ -191,6 +195,9 @@ public abstract class EmvApplet extends Applet {
             case CMD_GENERATE_AC:
             case CMD_EXTERNAL_AUTHENTICATE:
             case CMD_EXCHANGE_RELAY_RESISTANCE_DATA:
+            case CMD_COMPUTE_CRYPTOGRAPHIC_CHECKSUM:
+            case CMD_RECOVER_AC:
+            case CMD_PUT_DATA_PLAIN:
             case CMD_APPLICATION_BLOCK:
             case CMD_APPLICATION_UNBLOCK:
             case CMD_CARD_BLOCK:
@@ -338,6 +345,7 @@ public abstract class EmvApplet extends Applet {
         }
 
         if (cmd == CMD_SELECT) {
+            checkSelect(buf);
             processSelect(apdu, buf);
             return;
         }
@@ -347,6 +355,22 @@ public abstract class EmvApplet extends Applet {
         }
 
         processCommand(apdu, buf, cmd, dataLength);
+    }
+
+    /**
+     * Check SELECT by DF name (EMV Book 1, 11.3). P2 '00' selects the first and '02' the next occurrence of a partial DF name.
+     * The JCRE selects the applet for the first occurrence. Each applet has a single DF name, so there is no next occurrence
+     * and a SELECT that did not select this applet did not find a matching file.
+     */
+    protected void checkSelect(byte[] buf) {
+        byte p2 = buf[ISO7816.OFFSET_P2];
+        if (buf[ISO7816.OFFSET_P1] != (byte) 0x04 || (p2 != (byte) 0x00 && p2 != (byte) 0x02)) {
+            EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        if (!selectingApplet()) {
+            EmvApplet.logAndThrow(ISO7816.SW_FILE_NOT_FOUND);
+        }
     }
 
     protected void factoryReset(APDU apdu, byte[] buf) {
@@ -428,10 +452,19 @@ public abstract class EmvApplet extends Applet {
     protected void processSetEmvTag(APDU apdu, byte[] buf, short dataLength) {
         short tagId = Util.getShort(buf, ISO7816.OFFSET_P1);
         if (tagId == 0x0000) {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
-        }
+            // Tag of one to three bytes is given in the command data before the value, e.g. 'DF 81 01' || value
+            if (dataLength == (short) 0 || buf[ISO7816.OFFSET_CDATA] == (byte) 0x00) {
+                ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+            }
+            short tagLength = EmvTag.tagEntryLength(buf, (short) ISO7816.OFFSET_CDATA);
+            if (tagLength > dataLength) {
+                ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+            }
 
-        EmvTag.setTag(tagId, buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
+            EmvTag.setTag(buf, (short) ISO7816.OFFSET_CDATA, buf, (short) (ISO7816.OFFSET_CDATA + tagLength), (byte) (dataLength - tagLength));
+        } else {
+            EmvTag.setTag(tagId, buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
+        }
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
     }
@@ -481,7 +514,8 @@ public abstract class EmvApplet extends Applet {
                 template = tagBf0cFci;
                 break;
             default:
-                ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+                template = getTagTemplate(templateId);
+                break;
         }
 
         if (template == null) {
@@ -491,6 +525,13 @@ public abstract class EmvApplet extends Applet {
         template.setData(buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    /**
+     * Application specific tag templates, null if templateId is not supported.
+     */
+    protected TagTemplate getTagTemplate(short templateId) {
+        return null;
     }
 
     protected void processSetReadRecordTemplate(APDU apdu, byte[] buf, short dataLength) {
@@ -503,6 +544,16 @@ public abstract class EmvApplet extends Applet {
         ReadRecord.setRecord(readRecordId, buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    /**
+     * Build FCI tag from its template. Template without tag list keeps the stored tag.
+     */
+    protected void expandFciTemplate(TagTemplate template, short tagId) {
+        if (template.getLength() != (byte) 0) {
+            short length = template.expandTlvToArray(tmpBuffer, (short) 0);
+            EmvTag.setTag(tagId, tmpBuffer, (short) 0, (byte) length);
+        }
     }
 
     protected void sendResponseTemplate(APDU apdu, byte[] buf, TagTemplate template) {
