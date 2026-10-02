@@ -44,8 +44,8 @@ public class CardRiskManagementTest {
     private static final String AC_MASTER_KEY = "0123456789ABCDEF FEDCBA9876543210";
     private static final String SM_MAC_MASTER_KEY = "89ABCDEF01234567 76543210FEDCBA98";
 
-    // Flags: random enabled and card risk management enabled
-    private static final String CARD_RISK_MANAGEMENT_ENABLED = "80 00 00 03 02 00 09";
+    // Flags: random enabled, Issuer Application Data in Application Cryptogram and card risk management enabled
+    private static final String CARD_RISK_MANAGEMENT_ENABLED = "80 00 00 03 02 00 0B";
 
     private BigInteger iccModulus;
 
@@ -128,7 +128,7 @@ public class CardRiskManagementTest {
 
     @Test
     public void visaCardVerificationResultsTest() throws CardException, GeneralSecurityException {
-        // Visa CVR '03' || 3 bytes at offset 3 of the Issuer Application Data '06 01 0A 03 A4 A0 02'
+        // Visa CVR '03' || 3 bytes at offset 3 of the Issuer Application Data '06 01 12 03 A4 A0 02'
         assertSw(0x9000, send("80 00 00 0D 02 02 03"));
         startTransaction();
 
@@ -137,22 +137,22 @@ public class CardRiskManagementTest {
 
         // Second GENERATE AC not requested, ARQC, offline PIN performed and failed. New card (no Last Online ATC Register)
         ResponseAPDU response = firstGenerateAc("80");
-        assertArrayEquals(hex("06 01 0A 03 A6 10 00"), findTag(response.getData(), 0x9F10));
+        assertArrayEquals(hex("06 01 12 03 A6 10 00"), findTag(response.getData(), 0x9F10));
 
         // TC in second GENERATE AC after successful issuer authentication
         response = approveOnline(response);
         assertEquals((byte) 0x40, cryptogramType(response));
-        assertArrayEquals(hex("06 01 0A 03 66 10 00"), findTag(response.getData(), 0x9F10));
+        assertArrayEquals(hex("06 01 12 03 66 10 00"), findTag(response.getData(), 0x9F10));
 
         // Online approval updates Last Online ATC Register
         assertArrayEquals(hex("9F 13 02 00 F1"), send("80 CA 9F 13 00").getData());
 
         startTransaction();
-        assertArrayEquals(hex("06 01 0A 03 A0 00 00"), findTag(firstGenerateAc("80").getData(), 0x9F10));
+        assertArrayEquals(hex("06 01 12 03 A0 00 00"), findTag(firstGenerateAc("80").getData(), 0x9F10));
 
         // Previous online transaction was not completed with the second GENERATE AC
         startTransaction();
-        assertArrayEquals(hex("06 01 0A 03 A0 80 00"), findTag(firstGenerateAc("80").getData(), 0x9F10));
+        assertArrayEquals(hex("06 01 12 03 A0 80 00"), findTag(firstGenerateAc("80").getData(), 0x9F10));
     }
 
     @Test
@@ -234,7 +234,7 @@ public class CardRiskManagementTest {
         startTransaction();
         ResponseAPDU response = firstGenerateAc("40");
         assertEquals((byte) 0x40, cryptogramType(response));
-        assertArrayEquals(hex("06 01 0A 03 90 30 00"), findTag(response.getData(), 0x9F10));
+        assertArrayEquals(hex("06 01 12 03 90 30 00"), findTag(response.getData(), 0x9F10));
     }
 
     @Test

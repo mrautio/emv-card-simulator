@@ -20,9 +20,12 @@
   res: '90 00'
 # ICC Application Cryptogram Master Key MK_AC (double length 3DES). When set, Application Cryptogram (9F26)
 # is generated with EMV Book 2 Common Session Key Derivation (A1.3.1) and ISO/IEC 9797-1 MAC Algorithm 3 (A1.2.1)
-# over CDOL related data || AIP || ATC. Clear the key with empty data ('80 00 00 07 00') to use the static 9F26 tag value.
-# Settings flags (80 00 00 03) value '00 02' also includes Issuer Application Data (9F10) as in Common Core Definitions ('00 03' keeps random enabled).
+# over CDOL related data || AIP || ATC || Issuer Application Data (9F10) when the IAD flag is set, as in Visa Cryptogram Version
+# Number 18 of the Issuer Application Data of this profile. Clear the key with empty data ('80 00 00 07 00') to use the static 9F26 tag value.
 - req: '80 00 00 07 10 01 23 45 67 89 AB CD EF FE DC BA 98 76 54 32 10'
+  res: '90 00'
+# Flags: random, Issuer Application Data included in the Application Cryptogram (Cryptogram Version Number 18)
+- req: '80 00 00 03 02 00 03'
   res: '90 00'
 # ARPC method for issuer authentication (EMV Book 2, 8.2) in EXTERNAL AUTHENTICATE or tag 91 in CDOL2:
 # '01' = Method 1, Issuer Authentication Data ARPC (8) || ARC (2)
@@ -31,7 +34,8 @@
 - req: '80 00 00 08 01 01'
   res: '90 00'
 # ICC Secure Messaging for Integrity Master Key MK_SMI (double length 3DES) for issuer script commands.
-# Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2.
+# Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2, or format 2 (CLA '84' / '04') of the
+# payment systems: data || 8-byte MAC over CLA INS P1 P2 Lc || ATC || Application Cryptogram || data.
 - req: '80 00 00 09 10 89 AB CD EF 01 23 45 67 76 54 32 10 FE DC BA 98'
   res: '90 00'
 # Relay Resistance Protocol timing '80 00 00 0A 06', see card_setup_app_mastercard_contactless_apdus.yaml
@@ -159,5 +163,6 @@
 # Static Application Cryptogram, used only when the Application Cryptogram Master Key is not set
 - req: '80 01 9F 26 08 B0 18 91 01 D1 14 16 C1'
   res: '90 00'
-- req: '80 01 9F 10 07 06 01 0A 03 A4 A0 02'
+# Issuer Application Data: length '06', Derivation Key Index '01', Cryptogram Version Number 18 ('12'), CVR '03 A4 A0 02'
+- req: '80 01 9F 10 07 06 01 12 03 A4 A0 02'
   res: '90 00'

@@ -2,8 +2,9 @@
 # Applied after card_setup_app_apdus.yaml, only the differing data objects are set here.
 - req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
   res: '90 00'
-# Flags: random, Application Cryptogram and fDDA in GET PROCESSING OPTIONS response (qVSDC)
-- req: '80 00 00 03 02 00 05'
+# Flags: random, Issuer Application Data in the Application Cryptogram (Cryptogram Version Number 18),
+# Application Cryptogram and fDDA in GET PROCESSING OPTIONS response (qVSDC)
+- req: '80 00 00 03 02 00 07'
   res: '90 00'
 # Visa Card Verification Results in Issuer Application Data 9F10
 - req: '80 00 00 0D 02 02 03'

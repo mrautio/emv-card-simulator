@@ -49,7 +49,8 @@ public class PaymentApplicationProtocolTest {
     private static final String AC_MASTER_KEY = "0123456789ABCDEF FEDCBA9876543210";
     // AIP and Issuer Application Data of the test profile
     private static final String AIP = "3C00";
-    private static final String ISSUER_APPLICATION_DATA = "06010A03A4A002";
+    // Issuer Application Data of Cryptogram Version Number 18, included in the Application Cryptogram
+    private static final String ISSUER_APPLICATION_DATA = "06011203A4A002";
     // ATC of the first transaction after personalization
     private static final String ATC = "00F1";
     // Authorisation Response Code of CDOL2_DATA
@@ -59,12 +60,17 @@ public class PaymentApplicationProtocolTest {
 
     // Secure messaging MAC chaining value of issuer script commands
     private byte[] secureMessagingMacChain;
+    // Application Cryptogram of the first GENERATE AC, included in the MAC of secure messaging format 2
+    private byte[] secureMessagingApplicationCryptogram;
     private byte[] secureMessagingSessionKey;
 
     private BigInteger iccModulus;
 
+    /**
+     * Application Cryptogram of the test profile over data || Issuer Application Data, e.g. CDOL1 related data || AIP || ATC || IAD.
+     */
     private static byte[] applicationCryptogram(byte[] atc, byte[]... data) throws GeneralSecurityException {
-        return retailMac(deriveSessionKey(hex(AC_MASTER_KEY), atc), concat(data));
+        return retailMac(deriveSessionKey(hex(AC_MASTER_KEY), atc), concat(concat(data), hex(ISSUER_APPLICATION_DATA)));
     }
 
     /**
@@ -113,6 +119,7 @@ public class PaymentApplicationProtocolTest {
     private void startSecureMessaging(byte[] applicationCryptogram) throws GeneralSecurityException {
         secureMessagingSessionKey = deriveSessionKey(hex(SM_MAC_MASTER_KEY), applicationCryptogram);
         secureMessagingMacChain = applicationCryptogram;
+        secureMessagingApplicationCryptogram = applicationCryptogram;
     }
 
     /**
@@ -134,6 +141,16 @@ public class PaymentApplicationProtocolTest {
 
     private String scriptCommand(String header) throws GeneralSecurityException {
         return scriptCommand(header, "", 8);
+    }
+
+    /**
+     * Issuer script command with secure messaging format 2 (EMV Book 2, 9.2.1.2): data || 8-byte MAC, no MAC chaining.
+     * MAC input: CLA INS P1 P2 Lc || ATC || Application Cryptogram || data
+     */
+    private String scriptCommandFormat2(String header, String data) throws GeneralSecurityException {
+        byte[] lc = new byte[] { (byte) (hex(data).length + 8) };
+        byte[] mac = retailMac(secureMessagingSessionKey, concat(hex(header), lc, hex(ATC), secureMessagingApplicationCryptogram, hex(data)));
+        return header + " " + toHex(lc) + " " + toHex(concat(hex(data), mac));
     }
 
     private byte[] recoverSignedData(byte[] signature) {
@@ -190,10 +207,12 @@ public class PaymentApplicationProtocolTest {
     public void unsupportedClassTest() throws CardException {
         assertSw(ISO7816.SW_CLA_NOT_SUPPORTED, send("A0 B2 01 14 00"));
         assertSw(ISO7816.SW_CLA_NOT_SUPPORTED, send("E0 00 00 01 02 12 34"));
-        assertSw(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED, send("84 1E 00 00 08 01 02 03 04 05 06 07 08"));
+        // Secure messaging without header authentication
+        assertSw(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED, send("88 1E 00 00 08 01 02 03 04 05 06 07 08"));
         assertSw(ISO7816.SW_INS_NOT_SUPPORTED, send("00 CA 9F 36 00"));
-        // Secure messaging format 1 only for issuer script commands
+        // Secure messaging formats 1 and 2 only for issuer script commands
         assertSw(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED, send("8C CA 9F 36 00"));
+        assertSw(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED, send("84 CA 9F 36 00"));
     }
 
     @Test
@@ -363,15 +382,15 @@ public class PaymentApplicationProtocolTest {
     }
 
     @Test
-    public void applicationCryptogramWithIssuerApplicationDataTest() throws CardException, GeneralSecurityException {
-        // Flags: random enabled, Issuer Application Data included in Application Cryptogram
-        assertSw(0x9000, send("80 00 00 03 02 00 03"));
+    public void applicationCryptogramWithoutIssuerApplicationDataTest() throws CardException, GeneralSecurityException {
+        // Flags: random enabled, Issuer Application Data not included in Application Cryptogram
+        assertSw(0x9000, send("80 00 00 03 02 00 01"));
         assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
 
         ResponseAPDU response = send("80 AE 80 00 1D " + CDOL1_DATA + " 00");
         assertSw(0x9000, response);
         assertArrayEquals(hex(ISSUER_APPLICATION_DATA), findTag(response.getData(), 0x9F10));
-        assertArrayEquals(applicationCryptogram(hex(ATC), hex(CDOL1_DATA), hex(AIP), hex(ATC), hex(ISSUER_APPLICATION_DATA)),
+        assertArrayEquals(retailMac(deriveSessionKey(hex(AC_MASTER_KEY), hex(ATC)), concat(hex(CDOL1_DATA), hex(AIP), hex(ATC))),
             findTag(response.getData(), 0x9F26));
     }
 
@@ -650,6 +669,44 @@ public class PaymentApplicationProtocolTest {
         // PIN Try Counter is reset to PIN Try Limit
         assertArrayEquals(hex("9F 17 01 03"), send("80 CA 9F 17 00").getData());
         assertSw(0x9000, send("00 20 00 80 08 24 12 34 FF FF FF FF FF"));
+    }
+
+    @Test
+    public void scriptFormat2ApplicationBlockTest() throws CardException, GeneralSecurityException {
+        startSecureMessaging(authorisationRequest());
+
+        // Payment system issuer scripts use secure messaging format 2, EMV Book 3 6.5.1 allows CLA '8C' or '84'
+        assertSw(0x9000, send(scriptCommandFormat2("84 1E 00 00", "")));
+        assertEquals((byte) 0x00, completeTransaction(CDOL2_DATA));
+        assertSw(0x6283, send("00 A4 04 00 07 AF FF FF FF FF 12 34 00"));
+    }
+
+    @Test
+    public void scriptFormat2Test() throws CardException, GeneralSecurityException {
+        final byte[] record = send("00 B2 01 14 00").getData();
+        startSecureMessaging(authorisationRequest());
+
+        // MAC is not chained: the same command with the same MAC is accepted again, also mixed with format 1 commands
+        String applicationUnblock = scriptCommandFormat2("84 18 00 00", "");
+        assertSw(0x9000, send(applicationUnblock));
+        assertSw(0x9000, send(scriptCommand("8C 18 00 00")));
+        assertSw(0x9000, send(applicationUnblock));
+        assertSw(0x9000, send(scriptCommandFormat2("84 24 00 00", "")));
+
+        // Data before the MAC is protected, placeholders accept the command without changing data
+        assertSw(0x9000, send(scriptCommandFormat2("04 DA 9F 36", "12 34")));
+        assertSw(0x9000, send(scriptCommandFormat2("84 DC 01 14", "70 03 9F 36 00")));
+        String putData = scriptCommandFormat2("04 DA 9F 36", "12 34");
+        assertSw(0x6988, send(putData.replace(" 12 34 ", " 12 35 ")));
+
+        // MAC for another command
+        assertSw(0x6988, send("84 1E" + applicationUnblock.substring("84 18".length())));
+        // MAC missing
+        assertSw(0x6987, send("84 1E 00 00 04 01 02 03 04"));
+
+        assertArrayEquals(hex("9F 36 02 00 F1"), send("80 CA 9F 36 00").getData());
+        assertArrayEquals(record, send("00 B2 01 14 00").getData());
+        assertEquals((byte) 0x40, completeTransaction(CDOL2_DATA));
     }
 
     @Test

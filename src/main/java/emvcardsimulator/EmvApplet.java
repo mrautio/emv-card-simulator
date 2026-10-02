@@ -64,7 +64,7 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_COMPUTE_CRYPTOGRAPHIC_CHECKSUM = (short) 0x802A;
     protected static final short CMD_RECOVER_AC = (short) 0x80D0;
     protected static final short CMD_PUT_DATA_PLAIN = (short) 0x80DA;
-    // Post-issuance commands with secure messaging format 1 (EMV Book 3, 6.5)
+    // Post-issuance commands with secure messaging (EMV Book 3, 6.5), format 1 (CLA '8C') or format 2 (CLA '84')
     protected static final short CMD_APPLICATION_BLOCK = (short) 0x8C1E;
     protected static final short CMD_APPLICATION_UNBLOCK = (short) 0x8C18;
     protected static final short CMD_CARD_BLOCK = (short) 0x8C16;
@@ -232,7 +232,8 @@ public abstract class EmvApplet extends Applet {
 
     /**
      * Validate CLA and return CLA || INS with the logical channel bits cleared.
-     * Secure messaging bits are kept for secure messaging format 1 (CLA 'xC'), EMV Book 2, 9.1.
+     * Secure messaging bits are set for both secure messaging format 1 (CLA 'xC') and format 2 (CLA 'x4'), EMV Book 2, 9.2.1,
+     * the format is given by isSecureMessagingFormat2.
      */
     protected static short getCommand(byte[] buf) {
         byte cla = buf[ISO7816.OFFSET_CLA];
@@ -243,14 +244,24 @@ public abstract class EmvApplet extends Applet {
             EmvApplet.logAndThrow(ISO7816.SW_CLA_NOT_SUPPORTED);
         }
 
-        // Secure messaging indication bits, format 2 (CLA 'x4') is payment system proprietary
+        // Secure messaging indication bits, ISO/IEC 7816-4 secure messaging without header authentication (CLA 'x8') is not used by EMV
         byte secureMessaging = (byte) (cla & (byte) 0x0C);
-        if (secureMessaging != 0 && secureMessaging != (byte) 0x0C) {
+        if (secureMessaging == (byte) 0x08) {
             ApduLog.addCommandLogEntry(buf, (short) 0, ISO7816.OFFSET_CDATA);
             EmvApplet.logAndThrow(ISO7816.SW_SECURE_MESSAGING_NOT_SUPPORTED);
         }
+        if (secureMessaging != 0) {
+            cla |= (byte) 0x0C;
+        }
 
         return Util.makeShort((byte) (cla & (byte) 0x8C), buf[ISO7816.OFFSET_INS]);
+    }
+
+    /**
+     * True if the command uses secure messaging format 2 (CLA 'x4'), payment system specific format of EMV Book 2, 9.2.1.2.
+     */
+    protected static boolean isSecureMessagingFormat2(byte[] buf) {
+        return (byte) (buf[ISO7816.OFFSET_CLA] & (byte) 0x0C) == (byte) 0x04;
     }
 
     /**

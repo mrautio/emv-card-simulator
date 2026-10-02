@@ -61,8 +61,13 @@ public class ContactlessTransactionTest {
         SmartCard.setLogging(true);
     }
 
-    private static byte[] applicationCryptogram(byte[] atc, byte[]... data) throws GeneralSecurityException {
-        return retailMac(deriveSessionKey(hex(AC_MASTER_KEY), atc), concat(data));
+    /**
+     * Application Cryptogram over PDOL related data arranged as CDOL1 related data || AIP || ATC || Issuer Application Data
+     * of the response, Cryptogram Version Number 18.
+     */
+    private static byte[] applicationCryptogram(ResponseAPDU response, byte[] atc) throws GeneralSecurityException {
+        byte[] data = concat(hex(CDOL1_DATA), hex(AIP), atc, findTag(response.getData(), 0x9F10));
+        return retailMac(deriveSessionKey(hex(AC_MASTER_KEY), atc), data);
     }
 
     /**
@@ -88,7 +93,7 @@ public class ContactlessTransactionTest {
 
     @Test
     public void qvsdcOnlineTest() throws CardException, GeneralSecurityException {
-        enableQvsdc("00 05", "82 94 57 9F 10 9F 26 9F 27 9F 36 9F 6C");
+        enableQvsdc("00 07", "82 94 57 9F 10 9F 26 9F 27 9F 36 9F 6C");
 
         ResponseAPDU response = qvsdcTransaction(TTQ_ONLINE_CRYPTOGRAM_REQUIRED);
         assertEquals((byte) 0x80, cryptogramType(response));
@@ -96,7 +101,7 @@ public class ContactlessTransactionTest {
         assertArrayEquals(hex("80 00"), findTag(response.getData(), 0x9F6C));
 
         // Application Cryptogram over PDOL related data arranged as CDOL1 related data
-        assertArrayEquals(applicationCryptogram(hex("00 F1"), hex(CDOL1_DATA), hex(AIP), hex("00 F1")), findTag(response.getData(), 0x9F26));
+        assertArrayEquals(applicationCryptogram(response, hex("00 F1")), findTag(response.getData(), 0x9F26));
 
         // Transaction is completed in GET PROCESSING OPTIONS
         assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 AE 80 00 1D " + CDOL1_DATA + " 00"));
@@ -104,11 +109,11 @@ public class ContactlessTransactionTest {
 
     @Test
     public void qvsdcOfflineOnlyReaderTest() throws CardException, GeneralSecurityException {
-        enableQvsdc("00 05", "82 94 57 9F 10 9F 26 9F 27 9F 36");
+        enableQvsdc("00 07", "82 94 57 9F 10 9F 26 9F 27 9F 36");
 
         ResponseAPDU response = qvsdcTransaction(TTQ_OFFLINE_ONLY);
         assertEquals((byte) 0x40, cryptogramType(response));
-        assertArrayEquals(applicationCryptogram(hex("00 F1"), hex(CDOL1_DATA), hex(AIP), hex("00 F1")), findTag(response.getData(), 0x9F26));
+        assertArrayEquals(applicationCryptogram(response, hex("00 F1")), findTag(response.getData(), 0x9F26));
 
         // Without card risk management, card goes online with online capable reader
         assertEquals((byte) 0x80, cryptogramType(qvsdcTransaction(TTQ_ONLINE_CAPABLE)));
@@ -117,7 +122,7 @@ public class ContactlessTransactionTest {
     @Test
     public void qvsdcCardRiskManagementTest() throws CardException {
         // Card risk management enabled, Lower Consecutive Offline Limit 1, Upper Consecutive Offline Limit 2
-        enableQvsdc("00 0D", "82 94 57 9F 10 9F 26 9F 27 9F 36");
+        enableQvsdc("00 0F", "82 94 57 9F 10 9F 26 9F 27 9F 36");
         assertSw(0x9000, send("80 01 9F 14 01 01"));
         assertSw(0x9000, send("80 01 9F 23 01 02"));
 
@@ -133,7 +138,7 @@ public class ContactlessTransactionTest {
     @Test
     public void fastDynamicDataAuthenticationTest() throws CardException, GeneralSecurityException {
         // Random disabled, Card Unpredictable Number is 'AB AB AB AB'
-        enableQvsdc("00 04", "82 94 57 9F 10 9F 26 9F 27 9F 36 9F 4B 9F 69 9F 6C");
+        enableQvsdc("00 06", "82 94 57 9F 10 9F 26 9F 27 9F 36 9F 4B 9F 69 9F 6C");
 
         ResponseAPDU response = qvsdcTransaction(TTQ_ONLINE_CRYPTOGRAM_REQUIRED);
         byte[] cardAuthenticationRelatedData = findTag(response.getData(), 0x9F69);

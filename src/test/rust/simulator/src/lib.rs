@@ -214,14 +214,20 @@ fn data_object_list_data(connection: &EmvConnection, dol_tag: &str) -> Vec<u8> {
 }
 
 /// Issuer verification of the Authorisation Request Cryptogram (9F26) the ICC generated with MK_AC
-/// over CDOL1 related data || AIP || ATC
+/// over CDOL1 related data || AIP || ATC || Issuer Application Data, Cryptogram Version Number 18 of the IAD
 fn verify_authorisation_request_cryptogram(connection: &EmvConnection, cdol1_data: &[u8]) {
     let aip = connection.get_tag_value("82").unwrap();
     let atc = connection.get_tag_value("9F36").unwrap();
+    let issuer_application_data = connection.get_tag_value("9F10").unwrap();
+    assert_eq!(
+        issuer_application_data[2], 0x12,
+        "Cryptogram Version Number 18 in Issuer Application Data"
+    );
 
     let mut data = cdol1_data.to_vec();
     data.extend_from_slice(aip);
     data.extend_from_slice(atc);
+    data.extend_from_slice(issuer_application_data);
     let expected_arqc = retail_mac(&application_cryptogram_session_key(atc), &data);
 
     assert_eq!(

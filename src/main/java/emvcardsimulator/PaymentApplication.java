@@ -130,8 +130,10 @@ public class PaymentApplication extends EmvApplet {
 
     // ICC Secure Messaging for Integrity Master Key MK_SMI (EMV Book 2, 9.2)
     private DESKey secureMessagingMacMasterKey = null;
-    // MAC chaining value of issuer script commands (EMV Book 2, 9.2.3.1)
+    // MAC chaining value of issuer script commands with secure messaging format 1 (EMV Book 2, 9.2.3.1)
     private byte[] secureMessagingMacChain;
+    // MAC length of issuer script commands with secure messaging format 2, the data field has no MAC data object to give it
+    private static final short SECURE_MESSAGING_FORMAT_2_MAC_LENGTH = (short) 8;
     // APPLICATION BLOCK state (EMV Book 3, 6.5.1)
     private boolean applicationBlocked = false;
 
@@ -1841,7 +1843,7 @@ public class PaymentApplication extends EmvApplet {
      * MAC is computed with the MAC Session Key derived from MK_SMI and the Application Cryptogram of the first GENERATE AC over
      * chaining value || CLA INS P1 P2 || '80 00 00 00' || data object || padding.
      */
-    private void verifySecureMessaging(byte[] buf, short dataLength) {
+    private void verifySecureMessagingFormat1(byte[] buf, short dataLength) {
         final short end = (short) (ISO7816.OFFSET_CDATA + dataLength);
         short offset = (short) ISO7816.OFFSET_CDATA;
 
@@ -1898,6 +1900,39 @@ public class PaymentApplication extends EmvApplet {
     }
 
     /**
+     * Verify secure messaging format 2 command data field: plaintext or enciphered data without TLV coding followed by an 8-byte MAC
+     * (EMV Book 2, 9.2.1.2), the format of the payment system issuer scripts with CLA '84'. MAC is computed with the MAC Session Key
+     * derived from MK_SMI and the Application Cryptogram of the first GENERATE AC over
+     * CLA INS P1 P2 Lc || ATC || Application Cryptogram || data || padding.
+     */
+    private void verifySecureMessagingFormat2(byte[] buf, short dataLength) {
+        if (dataLength < SECURE_MESSAGING_FORMAT_2_MAC_LENGTH) {
+            EmvApplet.logAndThrow(SW_EXPECTED_SM_DATA_OBJECTS_MISSING);
+        }
+
+        EmvTag applicationTransactionCounter = EmvTag.findTag((short) 0x9F36);
+        if (applicationTransactionCounter == null || applicationTransactionCounter.getLength() != (byte) 2) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        final short plainDataLength = (short) (dataLength - SECURE_MESSAGING_FORMAT_2_MAC_LENGTH);
+
+        deriveSessionKey(secureMessagingMacMasterKey, firstApplicationCryptogram, (short) 8);
+
+        macInit();
+        macUpdate(buf, (short) ISO7816.OFFSET_CLA, (short) 5);
+        macUpdate(applicationTransactionCounter.getData(), (short) 0, (short) 2);
+        macUpdate(firstApplicationCryptogram, (short) 0, (short) 8);
+        macUpdate(buf, (short) ISO7816.OFFSET_CDATA, plainDataLength);
+        macFinal(tmpBuffer, (short) 0);
+
+        if (Util.arrayCompare(tmpBuffer, (short) 0, buf, (short) (ISO7816.OFFSET_CDATA + plainDataLength),
+            SECURE_MESSAGING_FORMAT_2_MAC_LENGTH) != (byte) 0x00) {
+            EmvApplet.logAndThrow(SW_INCORRECT_SM_DATA_OBJECTS);
+        }
+    }
+
+    /**
      * Process issuer script command delivered after the first GENERATE AC (EMV Book 3, 10.10 Issuer-to-Card Script Processing).
      */
     private void processScriptCommand(APDU apdu, byte[] buf, short cmd, short dataLength) {
@@ -1930,7 +1965,11 @@ public class PaymentApplication extends EmvApplet {
     }
 
     private void executeScriptCommand(byte[] buf, short cmd, short dataLength) {
-        verifySecureMessaging(buf, dataLength);
+        if (isSecureMessagingFormat2(buf)) {
+            verifySecureMessagingFormat2(buf, dataLength);
+        } else {
+            verifySecureMessagingFormat1(buf, dataLength);
+        }
 
         short p1p2 = Util.getShort(buf, ISO7816.OFFSET_P1);
         switch (cmd) {
