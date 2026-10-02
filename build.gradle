@@ -131,7 +131,7 @@ test {
 
     testLogging {
         outputs.upToDateWhen { false }
-        events "started", "skipped", "failed"
+        events "started", "passed", "skipped", "failed"
         exceptionFormat "full"
         showStandardStreams true
     }

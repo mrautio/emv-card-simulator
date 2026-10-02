@@ -120,8 +120,31 @@ final class EmvTestUtil {
         return result.toString().trim();
     }
 
+    /**
+     * Send APDU command, response data of '61xx' is completed with GET RESPONSE like a terminal does.
+     */
     static ResponseAPDU send(String apdu) throws CardException {
-        return SmartCard.transmitCommand(hex(apdu));
+        ResponseAPDU response = SmartCard.transmitCommand(hex(apdu));
+        byte[] data = response.getData();
+        while (response.getSW1() == 0x61) {
+            response = SmartCard.transmitCommand(hex(String.format("00 C0 00 00 %02X", response.getSW2())));
+            data = concat(data, response.getData());
+        }
+        return new ResponseAPDU(concat(data, new byte[] { (byte) response.getSW1(), (byte) response.getSW2() }));
+    }
+
+    /**
+     * Offset of the first data object in a response template, after the template tag and its one to three byte length.
+     */
+    static int templateValueOffset(byte[] template) {
+        switch (template[1]) {
+            case (byte) 0x81:
+                return 3;
+            case (byte) 0x82:
+                return 4;
+            default:
+                return 2;
+        }
     }
 
     static void assertSw(int expectedSw, ResponseAPDU response) {
@@ -132,7 +155,7 @@ final class EmvTestUtil {
      * Find value of a primitive tag from the response template 77.
      */
     static byte[] findTag(byte[] template, int tag) {
-        int offset = (template[1] == (byte) 0x81) ? 3 : 2;
+        int offset = templateValueOffset(template);
         while (offset < template.length) {
             int tagId = template[offset] & 0xFF;
             offset++;
@@ -161,7 +184,7 @@ final class EmvTestUtil {
      */
     static byte[] responseTlvsWithoutSdad(byte[] template) {
         byte[] result = new byte[0];
-        int offset = (template[1] == (byte) 0x81) ? 3 : 2;
+        int offset = templateValueOffset(template);
         while (offset < template.length) {
             int start = offset;
             int tagId = template[offset] & 0xFF;

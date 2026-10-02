@@ -10,8 +10,9 @@ import javacard.framework.ISO7816;
 import javax.smartcardio.CardException;
 import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
-import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class SimulatorTest {
@@ -19,26 +20,36 @@ public class SimulatorTest {
 
     private static native void entryPoint(SimulatorTest callback);
 
+    private static native void mastercardContactlessEntryPoint(SimulatorTest callback);
+
+    private static native void visaContactlessEntryPoint(SimulatorTest callback);
+
+    @BeforeAll
+    public static void loadLibrary() {
+        System.loadLibrary("simulator");
+    }
+
     /**
      * Setup smart card for the use with the simulator.
      * @throws CardException
      */
-    @BeforeAll
-    public static void setup() throws CardException {
-        System.loadLibrary("simulator");
-
+    @BeforeEach
+    public void setup() throws CardException {
         SmartCard.setLogging(false);
         SmartCard.connect();
 
         // 1PAY.SYS.DDF01
         byte[] pseAid = new byte[] { (byte) 0x31, (byte) 0x50, (byte) 0x41, (byte) 0x59, (byte) 0x2E, (byte) 0x53, (byte) 0x59, (byte) 0x53, (byte) 0x2E, (byte) 0x44, (byte) 0x44, (byte) 0x46, (byte) 0x30, (byte) 0x31 };
+        // 2PAY.SYS.DDF01
+        byte[] ppseAid = new byte[] { (byte) 0x32, (byte) 0x50, (byte) 0x41, (byte) 0x59, (byte) 0x2E, (byte) 0x53, (byte) 0x59, (byte) 0x53, (byte) 0x2E, (byte) 0x44, (byte) 0x44, (byte) 0x46, (byte) 0x30, (byte) 0x31 };
         byte[] aid = new byte[] { (byte) 0xAF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF,  (byte) 0xFF, (byte) 0x12, (byte) 0x34 };
         SmartCard.install(pseAid, PaymentSystemEnvironmentContainer.class);
+        SmartCard.install(ppseAid, ProximityPaymentSystemEnvironment.class);
         SmartCard.install(aid, PaymentApplicationContainer.class);
     }
 
-    @AfterAll
-    public static void disconnect() throws CardException {
+    @AfterEach
+    public void disconnect() throws CardException {
         SmartCard.disconnect();
         SmartCard.setLogging(true);
     }
@@ -46,6 +57,22 @@ public class SimulatorTest {
     @Test
     public void simulatorEndToEndTransactionTest() {
         SimulatorTest.entryPoint(new SimulatorTest());
+    }
+
+    /**
+     * Mastercard contactless (Kernel 2): Relay Resistance Protocol, enciphered offline PIN and CDA.
+     */
+    @Test
+    public void simulatorEndToEndMastercardContactlessTransactionTest() {
+        SimulatorTest.mastercardContactlessEntryPoint(new SimulatorTest());
+    }
+
+    /**
+     * Visa contactless (Kernel 3): qVSDC with fDDA and no CVM.
+     */
+    @Test
+    public void simulatorEndToEndVisaContactlessTransactionTest() {
+        SimulatorTest.visaContactlessEntryPoint(new SimulatorTest());
     }
 
     private void printAsHex(String type, byte[] buf) {

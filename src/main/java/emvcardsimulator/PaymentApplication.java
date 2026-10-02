@@ -418,7 +418,7 @@ public class PaymentApplication extends EmvApplet {
         cumulativeOfflineAmountLimits = new byte[(short) (2 * AMOUNT_LENGTH)];
         transactionLog = new TransactionLog();
         cvc3InitializationVectors = new byte[4];
-        recoverableResponse = new byte[255];
+        recoverableResponse = new byte[RESPONSE_BUFFER_SIZE];
         recoverableDrdolData = new byte[255];
 
         rsaCipher = Cipher.getInstance(Cipher.ALG_RSA_NOPAD, false);
@@ -496,7 +496,7 @@ public class PaymentApplication extends EmvApplet {
             EmvApplet.logAndThrow(SW_SELECTED_FILE_INVALIDATED);
         }
 
-        // Check if PAN (tag A5) exists in the ICC
+        // Check if PAN (tag 5A) exists in the ICC
         if (EmvTag.findTag((short) 0x5A) != null) {
             expandFciTemplate(tagBf0cFci, (short) 0xBF0C);
             expandFciTemplate(tagA5Fci, (short) 0xA5);

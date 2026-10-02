@@ -1,0 +1,22 @@
+# Mastercard contactless (EMV Contactless Book C-2, Kernel 2) profile: CDA, Relay Resistance Protocol and enciphered offline PIN.
+# Applied after card_setup_app_apdus.yaml, only the differing data objects are set here.
+- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
+  res: '90 00'
+# Relay Resistance Protocol timing (EMV Contactless Book C-2, 3.10 and 5.3), in units of hundreds of microseconds:
+# Min Time For Processing Relay Resistance APDU (2) || Max Time For Processing Relay Resistance APDU (2) ||
+# Device Estimated Transmission Time For Relay Resistance R-APDU (2): min 0.0 ms, max 20.0 ms, transmission 1.8 ms.
+# Relay resistance data of the latest exchange is included in the CDA signature (C-2, Table 6.8).
+- req: '80 00 00 0A 06 00 00 00 C8 00 12'
+  res: '90 00'
+# Application Interchange Profile: cardholder verification, terminal risk management and CDA supported (byte 1),
+# EMV mode and Relay Resistance Protocol supported (byte 2, EMV Contactless Book C-2, A.1.16)
+- req: '80 01 00 82 02 19 81'
+  res: '90 00'
+# CVM List: enciphered PIN verified by ICC if the terminal supports it (apply succeeding CVM Rule if unsuccessful),
+# otherwise No CVM required
+- req: '80 01 00 8E 0C 00 00 00 00 00 00 00 00 44 03 1F 03'
+  res: '90 00'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated
+# includes the Application Interchange Profile (Static Data Authentication Tag List 9F4A) and the CVM List
+- req: '80 01 9F 46 F8 4B B7 CD 4F 02 96 65 AD 24 68 2C 14 7F 4B CF EB 21 23 E7 6A 62 27 2A 19 B8 90 BF 48 3B 2D C5 1B 83 41 A8 BB 79 61 EC 71 8D BF B3 40 59 89 E5 20 09 68 1B 32 72 20 5C F8 8D B3 10 B5 3C C2 EB E8 D9 89 0A 40 D8 D1 AA 59 E3 C0 E0 23 B9 2B 95 3D 08 ED 51 A8 F5 07 99 B3 7C F9 4E BF 0A FA F3 91 87 02 37 52 7E 98 65 B8 51 2F DA 17 E4 27 6F 58 B1 DF C7 A4 BD 14 31 39 5B 3B CF 74 D6 0D 88 A6 5D 6B 4F 02 89 98 6A 7E C5 20 D9 B5 E3 CA 9E 29 14 F8 DE 57 D8 C3 33 51 22 F3 9C EF 39 97 6B CA 6E D0 DE 3A 44 29 37 6A 91 46 BD 81 50 33 CE 3A 3D 7D E6 85 14 A2 5A B4 E1 F9 95 55 D1 32 2D 85 2A 52 84 51 5B AD 1F A6 7E 1D C6 7B 3C D9 3B D4 B3 D1 A0 02 DB C2 09 65 FC 48 EB 29 3D CA 5A 2F 46 2F A0 D7 FE BD 3B 25 1A 0A 5B 10 02 67 A8 A3 06 E9 89 F8 A8 57 1F 15'
+  res: '90 00'

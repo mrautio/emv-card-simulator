@@ -34,13 +34,7 @@
 # Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2.
 - req: '80 00 00 09 10 89 AB CD EF 01 23 45 67 76 54 32 10 FE DC BA 98'
   res: '90 00'
-# Relay Resistance Protocol timing (EMV Contactless Book C-2, 3.10 and 5.3), in units of hundreds of microseconds:
-# Min Time For Processing Relay Resistance APDU (2) || Max Time For Processing Relay Resistance APDU (2) ||
-# Device Estimated Transmission Time For Relay Resistance R-APDU (2). Default is min 0.0 ms, max 20.0 ms, transmission 1.8 ms.
-# EXCHANGE RELAY RESISTANCE DATA ('80 EA') is supported when AIP (tag 82) byte 2 bit 1 is set, e.g. '80 01 00 82 02 3C 01'.
-# Relay resistance data of the latest exchange is then included in the CDA signature (C-2, Table 6.8).
-- req: '80 00 00 0A 06 00 00 00 C8 00 12'
-  res: '90 00'
+# Relay Resistance Protocol timing '80 00 00 0A 06' (EMV Contactless Book C-2), used when AIP (tag 82) byte 2 bit 1 is set.
 # Optional settings, see PaymentApplication.processSetSettings:
 # Flags ('80 00 00 03 02 00 xx'), xx is a sum of: '01' random, '02' IAD in AC, '04' qVSDC (Application Cryptogram and fDDA in
 # GET PROCESSING OPTIONS response, cryptogram type from Terminal Transaction Qualifiers 9F66 in PDOL), '08' card risk management.
@@ -96,13 +90,13 @@
   res: '90 00'
 - req: '80 01 00 94 0C 08 02 02 00 10 01 02 00 18 01 02 01'
   res: '90 00'
-- req: '80 01 00 57 13 12 34 56 00 12 34 56 08 D1 81 12 21 12 29 42 49 00 20 0F'
+- req: '80 01 00 57 13 12 34 56 00 12 34 56 08 D2 91 22 21 12 29 42 49 00 20 0F'
   res: '90 00'
-- req: '80 01 5F 20 1A 34 35 33 37 46 49 2F 56 45 53 41 45 4C 45 43 54 52 4F 4E 45 4C 4F 4B 33 31 36'
+- req: '80 01 5F 20 0F 43 41 52 44 48 4F 4C 44 45 52 2F 54 45 53 54'
   res: '90 00'
 - req: '80 01 9F 1F 18 31 32 32 39 34 30 30 30 30 30 32 30 30 30 30 32 34 39 30 30 30 30 30 30'
   res: '90 00'
-- req: '80 01 9F 46 B0 91 C0 3D C4 32 72 45 67 48 61 B3 29 C2 F2 E0 DA 63 69 68 6E CB F8 6A 20 1D A1 47 C5 2F 38 96 C3 4A 91 B6 67 85 6A D1 69 9C 6F 41 D8 80 CF 62 1C C2 46 F3 7A A3 67 71 81 BF BE 9B 97 F8 BE 98 F7 6F 83 2D 3C 5B 4E 2F B6 AC C0 A0 CF 11 D1 E3 28 99 82 37 96 1E B2 4D 27 B8 1D C6 99 DE 83 59 B1 07 48 EF 82 80 8D BD 51 5A 17 09 29 7B 51 D9 F2 3B B6 DB B7 56 80 54 4E 6A 8E 18 BE EF 2D 68 FB B5 9C B8 4E 77 3A FA C2 61 3A D1 66 16 20 F3 9C 10 5D 8D 66 C0 D2 D5 26 09 63 12 2D 9A FA 2B 90 8F FC FB 79 6B 3A 12 D3 CB 9A 8D 0E 4A 43 24 71'
+- req: '80 01 9F 46 B0 18 C4 7E 97 42 50 01 42 A5 30 DC C6 83 43 19 82 9E 60 20 4C 3D AC 1C A9 68 61 E4 0A 0F 2A CA EA 78 31 41 1B FC C7 6D AF D5 27 EC AA 44 33 72 E2 8F C1 3D C2 0E 47 81 48 AF C0 73 42 B2 E1 B4 AF B4 28 4F 71 41 64 6C 42 F3 42 01 37 FD D8 90 B4 77 A8 A3 14 E2 9E A5 89 41 7A 68 A2 24 82 13 60 FB 0C A7 C4 D7 42 80 46 2F E7 EA DE D5 81 33 5C 7A 00 80 AE 2B C4 7C 2A 21 AF 58 8D E7 19 A0 00 A5 18 7E 65 E0 98 A5 16 4E 5C 4F 38 A7 CD 55 53 DB 98 67 0E 5C 77 28 22 43 CA CD 8E A9 F9 C3 A1 2B C1 07 70 D5 5D C9 15 4D 19 53 5A 6C DD 07 4C'
   res: '90 00'
 - req: '80 01 9F 47 01 03'
   res: '90 00'
@@ -116,7 +110,7 @@
   res: '90 00'
 - req: '80 01 00 90 B0 20 08 FB 40 DD A8 99 99 AF 87 3A 0D 9B AB 15 8D 5A CE 11 34 4F E3 8F 72 05 3C C5 EC CF E4 96 BB A5 8B 37 D6 69 BA B2 CE AF 93 7F 32 97 35 E0 27 41 E7 12 2C 83 2B E3 3C D1 AA 38 D2 7C DA CC ED 8B 02 F0 EA 23 1C 7C 6B CB F8 23 9E CF 2C 11 95 4B 40 7D 58 E9 A6 89 AB 22 DF C9 98 02 2A 17 9F AF C6 19 AB C5 AB 23 7C 68 41 02 39 12 93 95 57 5E 62 3F 4F 8B A8 38 0A 39 07 AC F4 20 09 B8 C3 D3 0F D1 0F BB 91 B1 3D C0 14 B6 19 BA 58 4C E0 B9 AC 6F B1 D3 A4 A7 45 03 F6 90 88 7F 11 13 13 D0 10 A3 A7 11 7E 8C 04 44 87 46 D3 AA F8 88 EA'
   res: '90 00'
-- req: '80 01 5F 24 03 18 11 30'
+- req: '80 01 5F 24 03 29 12 31'
   res: '90 00'
 - req: '80 01 00 5A 08 12 34 56 00 12 34 56 08'
   res: '90 00'
@@ -147,8 +141,6 @@
 - req: '80 01 00 8D 17 8A 02 9F 02 06 9F 03 06 9F 1A 02 95 05 5F 2A 02 9A 03 9C 01 9F 37 04'
   res: '90 00'
 - req: '80 01 00 A5 2E 50 0D 56 45 53 41 20 45 4C 45 43 54 52 4F 4E 5F 2D 02 65 6E 87 01 01 9F 12 10 56 45 53 41 20 20 20 20 20 20 20 20 20 20 20 20 9F 11 01 01'
-  res: '90 00'
-- req: '80 01 9F 4B 80 44 6A DC 3F 29 DB D7 AD AE D0 7C AD 17 C0 03 6D C8 8D BD FB 6A 42 B1 BB 33 E0 C0 62 69 99 77 7D 87 EE 4B 18 EA D6 E8 75 38 58 AB 2D 3F 0C 89 1F 93 8D 22 05 27 B1 BD CC 65 29 51 FD 45 1D 62 44 50 50 8D D0 36 BB DD FE AE DE 3A 1D 56 A8 CA AC C8 69 B8 4B 95 8C 71 CA C5 A9 04 57 86 01 5F D1 DC D7 85 1A 0B 83 8C 65 85 C4 ED 92 6B 00 0A 24 B1 A4 04 74 86 56 2E 99 1B E6 00 11 4F F0 86 FA'
   res: '90 00'
 - req: '80 01 9F 27 01 80'
   res: '90 00'

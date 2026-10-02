@@ -1,0 +1,30 @@
+# Visa contactless (EMV Contactless Book C-3, Kernel 3) profile: qVSDC online transaction with fDDA and no CVM.
+# Applied after card_setup_app_apdus.yaml, only the differing data objects are set here.
+- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
+  res: '90 00'
+# Flags: random, Application Cryptogram and fDDA in GET PROCESSING OPTIONS response (qVSDC)
+- req: '80 00 00 03 02 00 05'
+  res: '90 00'
+# Visa Card Verification Results in Issuer Application Data 9F10
+- req: '80 00 00 0D 02 02 03'
+  res: '90 00'
+# FCI Proprietary Template (A5) with the PDOL
+- req: '80 02 00 05 0C 00 50 5F 2D 00 87 9F 12 9F 11 9F 38'
+  res: '90 00'
+# GET PROCESSING OPTIONS response template: AIP, AFL, Track 2, IAD, AC, CID, ATC, Signed Dynamic Application Data,
+# Card Authentication Related Data and Card Transaction Qualifiers
+- req: '80 02 00 01 14 00 82 00 94 00 57 9F 10 9F 26 9F 27 9F 36 9F 4B 9F 69 9F 6C'
+  res: '90 00'
+# Application Interchange Profile: DDA (fDDA) supported, no cardholder verification in the CVM List
+- req: '80 01 00 82 02 20 00'
+  res: '90 00'
+# PDOL: Terminal Transaction Qualifiers followed by the CDOL1 data objects
+- req: '80 01 9F 38 18 9F 66 04 9F 02 06 9F 03 06 9F 1A 02 95 05 5F 2A 02 9A 03 9C 01 9F 37 04'
+  res: '90 00'
+# Card Transaction Qualifiers: no online PIN or signature required, CVM is not required
+- req: '80 01 9F 6C 02 00 00'
+  res: '90 00'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated
+# includes the Application Interchange Profile (Static Data Authentication Tag List 9F4A) and the CVM List
+- req: '80 01 9F 46 F8 42 03 FA 99 01 85 6B EA 5F 33 AB 95 3A 3C 0C 14 21 51 34 79 5D B1 C0 EF 7C FA C1 02 98 DE BA 73 FA 4F A5 F6 AA 86 12 C1 B4 1D FF FE E2 1F B1 47 AD 3E 2E 5A DA C7 3F 78 25 57 58 23 DC FF 36 B3 F5 D5 99 CE BC 38 54 9D 30 6E B6 EF 25 3B 7A 58 3F 76 AC FC 24 55 EC E8 04 B9 10 D7 A3 D8 12 35 1F 48 B5 83 D9 1C F6 10 16 92 01 86 2D 22 42 E3 B1 FA 02 F0 F6 FE D8 55 F5 51 D7 E4 2F 91 8B 00 76 16 21 F7 71 F9 A5 7C D7 A4 61 86 96 A6 37 46 F4 D1 29 A1 EA 37 19 61 74 0B 1D 08 EB 1C A5 F4 52 36 23 1F 2D 7D 3D 82 DE 1F 57 E2 7A E4 03 C6 55 81 EB 36 2E 29 DD C4 4E 5A A0 E4 66 89 CB E1 58 10 C9 AE DE 35 9D F5 8E 14 5B D4 E5 0A 99 44 47 9D A2 B7 33 3B 0F 69 70 01 23 A0 63 AE 18 AF A9 92 7F 91 39 09 B9 CA 42 44 1C BE F6 9B D0 A1 0C 45 15 F7 28 D1 86 ED'
+  res: '90 00'

@@ -310,8 +310,9 @@ public class CardRiskManagementTest {
 
     @Test
     public void pinEnciphermentKeyTest() throws CardException, GeneralSecurityException {
+        // PIN key of the ICC key size, the card expects the enciphered PIN in its modulus length
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
-        generator.initialize(new RSAKeyGenParameterSpec(1024, EmvTestUtil.ICC_PUBLIC_EXPONENT));
+        generator.initialize(new RSAKeyGenParameterSpec(iccModulus.bitLength(), EmvTestUtil.ICC_PUBLIC_EXPONENT));
         RSAPrivateKey pinKey;
         do {
             pinKey = (RSAPrivateKey) generator.generateKeyPair().getPrivate();
@@ -319,8 +320,10 @@ public class CardRiskManagementTest {
         } while (pinKey.getModulus().compareTo(iccModulus) <= 0);
 
         assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 00 00 10 01 03"));
-        assertSw(0x9000, SmartCard.transmitCommand(concat(hex("80 00 00 0F 80"), unsigned(pinKey.getModulus(), 128))));
-        assertSw(0x9000, SmartCard.transmitCommand(concat(hex("80 00 00 10 80"), unsigned(pinKey.getPrivateExponent(), 128))));
+        int keySize = (iccModulus.bitLength() + 7) / 8;
+        String keyLength = String.format(" %02X", keySize);
+        assertSw(0x9000, SmartCard.transmitCommand(concat(hex("80 00 00 0F" + keyLength), unsigned(pinKey.getModulus(), keySize))));
+        assertSw(0x9000, SmartCard.transmitCommand(concat(hex("80 00 00 10" + keyLength), unsigned(pinKey.getPrivateExponent(), keySize))));
 
         // ICC PIN Encipherment Key is used instead of ICC key
         assertSw(0x9000, verifyEncipheredPin(pinKey.getModulus()));

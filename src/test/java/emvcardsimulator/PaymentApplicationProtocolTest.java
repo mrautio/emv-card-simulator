@@ -701,7 +701,7 @@ public class PaymentApplicationProtocolTest {
 
         // ICC Unpredictable Number is required
         byte[] enciphered = encipherPin(pinBlock, new byte[8]);
-        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(concat(hex("00 20 00 88 80"), enciphered)));
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(concat(hex(String.format("00 20 00 88 %02X", enciphered.length)), enciphered)));
 
         assertSw(0x6C08, send("00 84 00 00 04"));
 
@@ -711,14 +711,14 @@ public class PaymentApplicationProtocolTest {
 
         enciphered = encipherPin(pinBlock, response.getData());
         assertSw(ISO7816.SW_WRONG_LENGTH, SmartCard.transmitCommand(concat(hex("00 20 00 88 7F"), Arrays.copyOf(enciphered, 0x7F))));
-        assertSw(0x9000, SmartCard.transmitCommand(concat(hex("00 20 00 88 80"), enciphered)));
+        assertSw(0x9000, SmartCard.transmitCommand(concat(hex(String.format("00 20 00 88 %02X", enciphered.length)), enciphered)));
 
         // ICC Unpredictable Number is single use
-        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(concat(hex("00 20 00 88 80"), enciphered)));
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(concat(hex(String.format("00 20 00 88 %02X", enciphered.length)), enciphered)));
 
         response = send("00 84 00 00 00");
         enciphered = encipherPin(hex("24 43 21 FF FF FF FF FF"), response.getData());
-        assertSw(0x63C2, SmartCard.transmitCommand(concat(hex("00 20 00 88 80"), enciphered)));
+        assertSw(0x63C2, SmartCard.transmitCommand(concat(hex(String.format("00 20 00 88 %02X", enciphered.length)), enciphered)));
     }
 
     @Test
@@ -789,6 +789,46 @@ public class PaymentApplicationProtocolTest {
         assertSw(0x9000, response);
         assertCombinedDataAuthentication(response.getData(), (byte) 0x40,
             applicationCryptogram(hex(ATC), hex(CDOL2_DATA), hex(AIP), hex(ATC)), concat(hex(CDOL1_DATA), hex(CDOL2_DATA)));
+    }
+
+    @Test
+    public void getResponseTest() throws CardException, GeneralSecurityException {
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(hex("00 C0 00 00 00")));
+
+        // CDA response with the 1984 bit ICC key signature does not fit a single response
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        ResponseAPDU response = SmartCard.transmitCommand(hex("80 AE 90 00 1D " + CDOL1_DATA + " 00"));
+        assertEquals(0x61, response.getSW1());
+        assertEquals(255, response.getData().length);
+        byte[] template = response.getData();
+        int remaining = response.getSW2();
+        assertArrayEquals(hex("77 82"), Arrays.copyOfRange(template, 0, 2));
+        assertEquals(4 + ((template[2] & 0xFF) << 8 | (template[3] & 0xFF)), 255 + remaining);
+
+        assertSw(ISO7816.SW_INCORRECT_P1P2, SmartCard.transmitCommand(hex("00 C0 01 00 00")));
+
+        // Le limits the part length
+        response = SmartCard.transmitCommand(hex("00 C0 00 00 02"));
+        assertSw(0x6100 | (remaining - 2), response);
+        template = concat(template, response.getData());
+
+        response = SmartCard.transmitCommand(hex("00 C0 00 00 00"));
+        assertSw(0x9000, response);
+        template = concat(template, response.getData());
+        assertEquals(255 + remaining, template.length);
+        assertCombinedDataAuthentication(template, (byte) 0x80,
+            applicationCryptogram(hex(ATC), hex(CDOL1_DATA), hex(AIP), hex(ATC)), hex(CDOL1_DATA));
+
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(hex("00 C0 00 00 00")));
+    }
+
+    @Test
+    public void getResponseDiscardedByNextCommandTest() throws CardException {
+        assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
+        assertEquals(0x61, SmartCard.transmitCommand(hex("80 AE 90 00 1D " + CDOL1_DATA + " 00")).getSW1());
+
+        assertSw(0x9000, send("80 CA 9F 36 00"));
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(hex("00 C0 00 00 00")));
     }
 
     @Test
@@ -928,7 +968,7 @@ public class PaymentApplicationProtocolTest {
         String[] expectedLog = new String[] {
             "80 A8 00 00 02 83 00",
             // Format 1 response starts with 80 like the setup commands
-            "80 0E 3C 00 08 02 02 00 10 01 02 00 18 01 02 01",
+            "80 0E 3C 00 08 02 02 00 10 01 03 00 18 01 02 01",
             "80 CA 9F 36 00",
             "9F 36 02 00 F6",
         };
