@@ -31,7 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * EMV protocol behaviour of the payment application with the test card profile.
+ * EMV protocol behaviour of the payment application with the test card profile, on the contact interface with T=1.
  */
 public class PaymentApplicationProtocolTest {
     private static final byte[] APPLET_AID = new byte[] { (byte) 0xAF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0xFF, (byte) 0x12, (byte) 0x34 };
@@ -155,12 +155,19 @@ public class PaymentApplicationProtocolTest {
     }
 
     /**
+     * Transport protocol of the tests.
+     */
+    protected String protocol() {
+        return SmartCard.PROTOCOL_T1;
+    }
+
+    /**
      * Personalize the card with the test profile and select the application.
      */
     @BeforeEach
     public void setup() throws CardException, IOException {
         SmartCard.setLogging(false);
-        SmartCard.connect();
+        SmartCard.connect(protocol());
         SmartCard.install(APPLET_AID, PaymentApplicationContainer.class);
 
         iccModulus = EmvTestUtil.personalize(SETUP_FILE);
@@ -196,7 +203,7 @@ public class PaymentApplicationProtocolTest {
         assertArrayEquals(hex("9F 36 02 00 F0"), response.getData());
 
         assertSw(0x9000, send("80 CA 9F 36 05"));
-        assertSw(0x6C05, send("80 CA 9F 36 02"));
+        assertSw(0x6C05, SmartCard.transmitCommand(hex("80 CA 9F 36 02")));
 
         response = send("80 CA 9F 17 00");
         assertSw(0x9000, response);
@@ -214,7 +221,7 @@ public class PaymentApplicationProtocolTest {
 
         int length = response.getData().length;
         assertSw(0x9000, send(String.format("00 B2 01 14 %02X", length)));
-        assertSw(0x6C00 | length, send(String.format("00 B2 01 14 %02X", length - 3)));
+        assertSw(0x6C00 | length, SmartCard.transmitCommand(hex(String.format("00 B2 01 14 %02X", length - 3))));
 
         assertSw(ISO7816.SW_RECORD_NOT_FOUND, send("00 B2 05 14 00"));
     }
@@ -703,7 +710,7 @@ public class PaymentApplicationProtocolTest {
         byte[] enciphered = encipherPin(pinBlock, new byte[8]);
         assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, SmartCard.transmitCommand(concat(hex(String.format("00 20 00 88 %02X", enciphered.length)), enciphered)));
 
-        assertSw(0x6C08, send("00 84 00 00 04"));
+        assertSw(0x6C08, SmartCard.transmitCommand(hex("00 84 00 00 04")));
 
         ResponseAPDU response = send("00 84 00 00 00");
         assertSw(0x9000, response);
@@ -798,6 +805,12 @@ public class PaymentApplicationProtocolTest {
         // CDA response with the 1984 bit ICC key signature does not fit a single response
         assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
         ResponseAPDU response = SmartCard.transmitCommand(hex("80 AE 90 00 1D " + CDOL1_DATA + " 00"));
+        if (SmartCard.isProtocolT0()) {
+            // No response data with a case 4 command
+            assertSw(0x6100, response);
+            assertEquals(0, response.getData().length);
+            response = SmartCard.transmitCommand(hex("00 C0 00 00 00"));
+        }
         assertEquals(0x61, response.getSW1());
         assertEquals(255, response.getData().length);
         byte[] template = response.getData();
@@ -812,7 +825,7 @@ public class PaymentApplicationProtocolTest {
         assertSw(0x6100 | (remaining - 2), response);
         template = concat(template, response.getData());
 
-        response = SmartCard.transmitCommand(hex("00 C0 00 00 00"));
+        response = SmartCard.transmitCommand(hex(String.format("00 C0 00 00 %02X", remaining - 2)));
         assertSw(0x9000, response);
         template = concat(template, response.getData());
         assertEquals(255 + remaining, template.length);
@@ -972,6 +985,19 @@ public class PaymentApplicationProtocolTest {
             "80 CA 9F 36 00",
             "9F 36 02 00 F6",
         };
+        if (SmartCard.isProtocolT0()) {
+            // Response data of the case 4 command with GET RESPONSE, case 2 command sent again with the response length
+            expectedLog = new String[] {
+                "80 A8 00 00 02 83 00",
+                "61 10",
+                "00 C0 00 00 10",
+                "80 0E 3C 00 08 02 02 00 10 01 03 00 18 01 02 01",
+                "80 CA 9F 36 00",
+                "6C 05",
+                "80 CA 9F 36 05",
+                "9F 36 02 00 F6",
+            };
+        }
 
         for (String expected : expectedLog) {
             ResponseAPDU response = send("80 06 00 00 00");

@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Card risk management, Card Verification Results, transaction log, PIN encipherment key, data objects and PUT DATA
- * of the payment application with the test card profile.
+ * of the payment application with the test card profile, on the contact interface with T=1.
  */
 public class CardRiskManagementTest {
     private static final byte[] APPLET_AID = hex("AF FF FF FF FF 12 34");
@@ -52,9 +52,16 @@ public class CardRiskManagementTest {
     private byte[] secureMessagingSessionKey;
     private byte[] secureMessagingMacChain;
 
+    /**
+     * Transport protocol of the tests.
+     */
+    protected String protocol() {
+        return SmartCard.PROTOCOL_T1;
+    }
+
     @BeforeEach
     public void setup() throws CardException, IOException {
-        iccModulus = EmvTestUtil.installAndPersonalize(APPLET_AID, PaymentApplicationContainer.class, SETUP_FILE);
+        iccModulus = EmvTestUtil.installAndPersonalize(protocol(), APPLET_AID, PaymentApplicationContainer.class, SETUP_FILE);
         assertSw(0x9000, send(SELECT));
     }
 
@@ -271,7 +278,7 @@ public class CardRiskManagementTest {
         assertArrayEquals(hex("40 000000000001 0978 200724 00F3 21"), send("00 B2 02 5C 00").getData());
         assertArrayEquals(hex("40 000000000001 0978 200724 00F2 21"), send("00 B2 03 5C 0F").getData());
         assertSw(ISO7816.SW_RECORD_NOT_FOUND, send("00 B2 04 5C 00"));
-        assertSw(0x6C0F, send("00 B2 01 5C 10"));
+        assertSw(0x6C0F, SmartCard.transmitCommand(hex("00 B2 01 5C 10")));
 
         // Other records are not affected
         assertSw(0x9000, send("00 B2 01 14 00"));

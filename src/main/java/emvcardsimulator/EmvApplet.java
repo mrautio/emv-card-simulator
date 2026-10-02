@@ -102,6 +102,8 @@ public abstract class EmvApplet extends Applet {
     protected static byte[] responseBuffer;
     // Offset and remaining length of the response data in responseBuffer not yet sent
     private short[] pendingResponse;
+    // Response data of a case 4 command with T=0 is sent only with GET RESPONSE
+    private boolean[] responseDeferred;
 
     protected static void logAndThrow(short responseTrailer) {
         ApduLog.addLogEntry(responseTrailer);
@@ -279,10 +281,26 @@ public abstract class EmvApplet extends Applet {
     }
 
     /**
-     * Check Le of a case 2 command against the response length. Le 0x00 accepts any response length.
+     * True for the T=0 protocol of the contact interface (ISO/IEC 7816-3). T=0 cannot send response data with a case 4
+     * command, the card returns '61xx' and the terminal gets the data with GET RESPONSE. P3 of a case 2 command is the
+     * exact response length, another length is answered with '6Cxx' (EMV Book 1, 9.3.1 and Annex A).
+     * T=1 and the contactless interface (ISO/IEC 14443-4) send the response data with the command.
+     */
+    protected static boolean isProtocolT0() {
+        byte protocol = APDU.getProtocol();
+        return (byte) (protocol & APDU.PROTOCOL_MEDIA_MASK) == APDU.PROTOCOL_MEDIA_DEFAULT
+            && (byte) (protocol & APDU.PROTOCOL_TYPE_MASK) == APDU.PROTOCOL_T0;
+    }
+
+    /**
+     * Check Le of a case 2 command against the response length. Le 0x00 accepts any response length,
+     * except with T=0 where P3 0x00 is 256 bytes.
      */
     protected static void checkExpectedLength(byte[] buf, short responseLength) {
         short expectedLength = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
+        if (expectedLength == 0 && isProtocolT0()) {
+            expectedLength = (short) 256;
+        }
         if (expectedLength != 0 && expectedLength != responseLength) {
             EmvApplet.logAndThrow((short) (ISO7816.SW_CORRECT_LENGTH_00 | (responseLength & 0x00FF)));
         }
@@ -352,6 +370,7 @@ public abstract class EmvApplet extends Applet {
         if (hasCommandData(cmd)) {
             dataLength = receiveData(apdu, buf);
         }
+        responseDeferred[0] = hasCommandData(cmd) && isProtocolT0();
 
         // Setup commands are filtered out by the log
         ApduLog.addCommandLogEntry(buf, (short) 0, (byte) (ISO7816.OFFSET_CDATA + dataLength));
@@ -368,14 +387,9 @@ public abstract class EmvApplet extends Applet {
         if (cmd == CMD_SELECT) {
             checkSelect(buf);
             processSelect(apdu, buf);
+        } else if (selectingApplet()) {
             return;
-        }
-
-        if (selectingApplet()) {
-            return;
-        }
-
-        if (cmd == CMD_GET_RESPONSE) {
+        } else if (cmd == CMD_GET_RESPONSE) {
             processGetResponse(apdu, buf);
         } else {
             processCommand(apdu, buf, cmd, dataLength);
@@ -457,7 +471,7 @@ public abstract class EmvApplet extends Applet {
 
                 if (logEntry != null) {
                     // hack to omit AID SELECT for reading the logs
-                    if (logEntry.next == ApduLog.tail && Util.getShort(logEntry.getData(), (short) 0) == 0x00A4) {
+                    if (isSelectExchange(logEntry)) {
                         ApduLog.clear();
                         ISOException.throwIt(ISO7816.SW_RECORD_NOT_FOUND);
                     }
@@ -478,6 +492,28 @@ public abstract class EmvApplet extends Applet {
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
                 break;
         }
+    }
+
+    /**
+     * True if the log entries from logEntry to the end are a SELECT command and its response,
+     * with T=0 the response is '61xx', GET RESPONSE command and the FCI.
+     */
+    private static boolean isSelectExchange(ApduLog logEntry) {
+        if ((logEntry.getLength() & 0x00FF) < 2 || Util.getShort(logEntry.getData(), (short) 0) != CMD_SELECT) {
+            return false;
+        }
+
+        ApduLog response = logEntry.next;
+        if (response != null && response.getLength() == (byte) 2 && response.getData()[0] == (byte) 0x61) {
+            ApduLog getResponse = response.next;
+            if (getResponse == null || (getResponse.getLength() & 0x00FF) < 2
+                || Util.getShort(getResponse.getData(), (short) 0) != CMD_GET_RESPONSE) {
+                return false;
+            }
+            response = getResponse.next;
+        }
+
+        return response != null && response == ApduLog.tail;
     }
 
     protected void processSetEmvTag(APDU apdu, byte[] buf, short dataLength) {
@@ -630,13 +666,16 @@ public abstract class EmvApplet extends Applet {
     }
 
     protected void sendResponse(APDU apdu, byte[] buf, byte[] data, short dataOffset, short length) {
-        if (length > MAX_RESPONSE_PART_LENGTH) {
+        boolean deferred = responseDeferred[0] && length > (short) 0;
+        if (deferred || length > MAX_RESPONSE_PART_LENGTH) {
             // Response data in the APDU buffer is at the command data offset
             short offset = (data == buf) ? (short) ISO7816.OFFSET_CDATA : dataOffset;
             Util.arrayCopy(data, offset, responseBuffer, (short) 0, length);
             pendingResponse[PENDING_RESPONSE_OFFSET] = (short) 0;
             pendingResponse[PENDING_RESPONSE_LENGTH] = length;
-            sendResponsePart(apdu, buf, MAX_RESPONSE_PART_LENGTH);
+            if (!deferred) {
+                sendResponsePart(apdu, buf, MAX_RESPONSE_PART_LENGTH);
+            }
             return;
         }
 
@@ -667,18 +706,24 @@ public abstract class EmvApplet extends Applet {
 
     /**
      * GET RESPONSE (ISO/IEC 7816-4, 7.6.1) returns the next part of the response data, at most Le bytes.
+     * With T=0, P3 longer than the remaining data is answered with '6Cxx'.
      */
     protected void processGetResponse(APDU apdu, byte[] buf) {
         if (Util.getShort(buf, ISO7816.OFFSET_P1) != (short) 0x0000) {
             EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
         }
 
-        if (pendingResponse[PENDING_RESPONSE_LENGTH] == (short) 0) {
+        short remaining = pendingResponse[PENDING_RESPONSE_LENGTH];
+        if (remaining == (short) 0) {
             EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
 
-        // Le '00' is the maximum
         short expectedLength = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
+        if (isProtocolT0() && remaining <= MAX_RESPONSE_PART_LENGTH && (expectedLength == (short) 0 || expectedLength > remaining)) {
+            EmvApplet.logAndThrow((short) (ISO7816.SW_CORRECT_LENGTH_00 | remaining));
+        }
+
+        // Le '00' is the maximum
         if (expectedLength == (short) 0 || expectedLength > MAX_RESPONSE_PART_LENGTH) {
             expectedLength = MAX_RESPONSE_PART_LENGTH;
         }
@@ -725,6 +770,7 @@ public abstract class EmvApplet extends Applet {
             responseBuffer = JCSystem.makeTransientByteArray(RESPONSE_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);
         }
         pendingResponse = JCSystem.makeTransientShortArray((short) 2, JCSystem.CLEAR_ON_DESELECT);
+        responseDeferred = JCSystem.makeTransientBooleanArray((short) 1, JCSystem.CLEAR_ON_DESELECT);
         
         factoryReset();
 

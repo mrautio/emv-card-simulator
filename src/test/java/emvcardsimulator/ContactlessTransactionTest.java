@@ -51,7 +51,7 @@ public class ContactlessTransactionTest {
 
     @BeforeEach
     public void setup() throws CardException, IOException {
-        iccModulus = EmvTestUtil.installAndPersonalize(APPLET_AID, PaymentApplicationContainer.class, SETUP_FILE);
+        iccModulus = EmvTestUtil.installAndPersonalize(SmartCard.PROTOCOL_CONTACTLESS, APPLET_AID, PaymentApplicationContainer.class, SETUP_FILE);
         assertSw(0x9000, send(SELECT));
     }
 

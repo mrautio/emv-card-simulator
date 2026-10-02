@@ -27,7 +27,7 @@ public class ProximityPaymentSystemEnvironmentTest {
 
     @BeforeEach
     public void setup() throws CardException, IOException {
-        EmvTestUtil.installAndPersonalize(PPSE_AID, ProximityPaymentSystemEnvironment.class, SETUP_FILE);
+        EmvTestUtil.installAndPersonalize(SmartCard.PROTOCOL_CONTACTLESS, PPSE_AID, ProximityPaymentSystemEnvironment.class, SETUP_FILE);
     }
 
     @AfterEach

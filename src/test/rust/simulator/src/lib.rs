@@ -8,6 +8,7 @@ use log4rs::{
     append::console::ConsoleAppender,
     config::{Appender, Root},
 };
+use openssl::rsa::{Padding, Rsa};
 use openssl::symm::{Cipher, Crypter, Mode};
 use serde::Deserialize;
 use std::error;
@@ -20,8 +21,8 @@ use emvpt::*;
 static JVM: OnceLock<JavaVM> = OnceLock::new();
 static CALLBACK: Mutex<Option<GlobalRef>> = Mutex::new(None);
 static APDU_RESPONSE: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-// CLA INS of the commands sent to the card, to check the command order of a transaction
-static SENT_COMMANDS: Mutex<Vec<[u8; 2]>> = Mutex::new(Vec::new());
+// Commands sent to the card, to check the command order and data of a transaction
+static SENT_COMMANDS: Mutex<Vec<Vec<u8>>> = Mutex::new(Vec::new());
 
 #[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
@@ -40,7 +41,7 @@ struct JavaSmartCardConnection {}
 impl ApduInterface for JavaSmartCardConnection {
     fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, ()> {
         trace!("CALLING {:02X?}", apdu);
-        SENT_COMMANDS.lock().unwrap().push([apdu[0], apdu[1]]);
+        SENT_COMMANDS.lock().unwrap().push(apdu.to_vec());
 
         let mut env = JVM.get().unwrap().get_env().unwrap();
         // Clone the reference so the lock is not held during the Java callback
@@ -333,6 +334,26 @@ fn contact_transaction(connection: &mut EmvConnection) {
 
     // Consume logs that the card gathered
     execute_setup_apdus(connection, &["../config/card_log_consume_apdus.yaml"]);
+    assert!(consume_logs(connection) > 0, "Card log entries");
+}
+
+// Default maximum number of the card log entries
+const MAX_LOG_ENTRIES: usize = 10;
+
+/// Consume the card log entries until 'Record not found', returns the number of entries. The number depends on the
+/// transport protocol: with T=0 the log has also the '61xx' and GET RESPONSE exchanges.
+fn consume_logs(connection: &mut EmvConnection) -> usize {
+    let mut entries = 0;
+    loop {
+        let (response_trailer, _) = connection.send_apdu(b"\x80\x06\x00\x00\x00");
+        if response_trailer[..] == b"\x6A\x83"[..] {
+            return entries;
+        }
+        assert_eq!(&response_trailer[..], b"\x90\x00", "Log entry response");
+
+        entries += 1;
+        assert!(entries <= MAX_LOG_ENTRIES, "Card log entries");
+    }
 }
 
 // Relay resistance timing personalized in card_setup_app_mastercard_contactless_apdus.yaml, in units of hundreds of microseconds:
@@ -373,9 +394,12 @@ fn mastercard_contactless_transaction(connection: &mut EmvConnection) {
 
     // EXCHANGE RELAY RESISTANCE DATA right after GET PROCESSING OPTIONS, before READ RECORD (EMV Contactless Book C-2, 3.10)
     let commands = SENT_COMMANDS.lock().unwrap().clone();
-    let get_processing_options = commands.iter().position(|c| c == b"\x80\xA8").unwrap();
-    assert_eq!(commands[get_processing_options + 1], *b"\x80\xEA");
-    assert_eq!(commands[get_processing_options + 2], *b"\x00\xB2");
+    let get_processing_options = commands
+        .iter()
+        .position(|c| c.starts_with(b"\x80\xA8"))
+        .unwrap();
+    assert!(commands[get_processing_options + 1].starts_with(b"\x80\xEA"));
+    assert!(commands[get_processing_options + 2].starts_with(b"\x00\xB2"));
 
     // Terminal Relay Resistance Entropy is the Unpredictable Number
     let relay_resistance_data = connection.icc.relay_resistance_data.clone().unwrap();
@@ -428,6 +452,46 @@ fn mastercard_contactless_transaction(connection: &mut EmvConnection) {
     // Online authorisation, no second GENERATE AC in a contactless transaction
     let cdol1_data = data_object_list_data(connection, "8C");
     verify_authorisation_request_cryptogram(connection, &cdol1_data);
+}
+
+// ICC private key of card_setup_app_apdus.yaml, the ICC PIN Encipherment key as the profile has no separate one
+const ICC_PRIVATE_KEY_FILE: &str = "../config/icc_1234560012345608_e_3_private_key.pem";
+
+/// Decipher the enciphered PIN data of a VERIFY command with the ICC private key like the card does, returns the PIN
+/// (EMV Book 2, 7.2: '7F' || PIN block || ICC Unpredictable Number || random padding)
+fn decipher_pin(verify_command: &[u8]) -> String {
+    let key = Rsa::private_key_from_pem(&fs::read(ICC_PRIVATE_KEY_FILE).unwrap()).unwrap();
+    let enciphered_pin_data = &verify_command[5..5 + verify_command[4] as usize];
+
+    let mut plaintext = vec![0u8; key.size() as usize];
+    key.private_decrypt(enciphered_pin_data, &mut plaintext, Padding::NONE)
+        .unwrap();
+    assert_eq!(plaintext[0], 0x7F, "Enciphered PIN data header");
+
+    // PIN block (EMV Book 3, 6.5.12): control '2' || PIN length || PIN digits || 'F' filler
+    let pin_block = &plaintext[1..9];
+    assert_eq!(pin_block[0] >> 4, 0x2, "PIN block control field");
+    let pin_length = (pin_block[0] & 0x0F) as usize;
+    hex::encode(&pin_block[1..])[..pin_length].to_string()
+}
+
+/// Fake Mastercard contactless card for a demonstration: the card asks for the enciphered offline PIN and as it holds
+/// the ICC private key, it deciphers the PIN the cardholder entered on the terminal
+fn fake_mastercard_contactless_pin_transaction(connection: &mut EmvConnection) {
+    mastercard_contactless_transaction(connection);
+
+    let commands = SENT_COMMANDS.lock().unwrap().clone();
+    let verify_command = commands
+        .iter()
+        .find(|c| c.starts_with(b"\x00\x20\x00\x88"))
+        .expect("VERIFY with enciphered PIN");
+
+    let pin = decipher_pin(verify_command);
+    info!(
+        "***** Fake card deciphered the cardholder PIN: {} *****",
+        pin
+    );
+    assert_eq!(pin, pin_entry().unwrap());
 }
 
 /// Visa contactless transaction (EMV Contactless Book C-3, Kernel 3): qVSDC online cryptogram returned in GET PROCESSING OPTIONS,
@@ -566,6 +630,20 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_mastercardContactless
         callback,
         "Mastercard contactless transaction",
         mastercard_contactless_transaction,
+    );
+}
+
+#[no_mangle]
+pub extern "system" fn Java_emvcardsimulator_SimulatorTest_fakeMastercardContactlessPinEntryPoint(
+    env: JNIEnv<'static>,
+    _class: JClass<'static>,
+    callback: JObject<'static>,
+) {
+    run_transaction(
+        env,
+        callback,
+        "Fake Mastercard contactless transaction with enciphered PIN",
+        fake_mastercard_contactless_pin_transaction,
     );
 }
 

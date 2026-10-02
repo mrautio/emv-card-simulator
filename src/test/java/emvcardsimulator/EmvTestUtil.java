@@ -121,10 +121,16 @@ final class EmvTestUtil {
     }
 
     /**
-     * Send APDU command, response data of '61xx' is completed with GET RESPONSE like a terminal does.
+     * Send APDU command like a terminal does: on '6Cxx' the command is sent again with Le xx,
+     * response data of '61xx' is completed with GET RESPONSE.
      */
     static ResponseAPDU send(String apdu) throws CardException {
-        ResponseAPDU response = SmartCard.transmitCommand(hex(apdu));
+        byte[] command = hex(apdu);
+        ResponseAPDU response = SmartCard.transmitCommand(command);
+        if (response.getSW1() == 0x6C) {
+            command[command.length - 1] = (byte) response.getSW2();
+            response = SmartCard.transmitCommand(command);
+        }
         byte[] data = response.getData();
         while (response.getSW1() == 0x61) {
             response = SmartCard.transmitCommand(hex(String.format("00 C0 00 00 %02X", response.getSW2())));
@@ -210,11 +216,13 @@ final class EmvTestUtil {
     }
 
     /**
-     * Start simulator with one applet and personalize it with the setup file, returns the ICC RSA key modulus if the file sets it.
+     * Start simulator with the transport protocol and one applet and personalize it with the setup file,
+     * returns the ICC RSA key modulus if the file sets it.
      */
-    static BigInteger installAndPersonalize(byte[] aid, Class<? extends Applet> applet, String setupFile) throws CardException, IOException {
+    static BigInteger installAndPersonalize(String protocol, byte[] aid, Class<? extends Applet> applet, String setupFile)
+        throws CardException, IOException {
         SmartCard.setLogging(false);
-        SmartCard.connect();
+        SmartCard.connect(protocol);
         SmartCard.install(aid, applet);
         return personalize(setupFile);
     }

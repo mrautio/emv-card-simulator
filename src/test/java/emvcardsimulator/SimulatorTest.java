@@ -2,6 +2,7 @@ package emvcardsimulator;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.licel.jcardsim.utils.AIDUtil;
 import java.util.Arrays;
@@ -12,7 +13,6 @@ import javax.smartcardio.CommandAPDU;
 import javax.smartcardio.ResponseAPDU;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 public class SimulatorTest {
@@ -22,6 +22,8 @@ public class SimulatorTest {
 
     private static native void mastercardContactlessEntryPoint(SimulatorTest callback);
 
+    private static native void fakeMastercardContactlessPinEntryPoint(SimulatorTest callback);
+
     private static native void visaContactlessEntryPoint(SimulatorTest callback);
 
     @BeforeAll
@@ -29,14 +31,16 @@ public class SimulatorTest {
         System.loadLibrary("simulator");
     }
 
+    // GET RESPONSE commands of the transaction
+    private int getResponseCount;
+
     /**
-     * Setup smart card for the use with the simulator.
+     * Setup smart card with the transport protocol for the use with the simulator.
      * @throws CardException
      */
-    @BeforeEach
-    public void setup() throws CardException {
+    private void setup(String protocol) throws CardException {
         SmartCard.setLogging(false);
-        SmartCard.connect();
+        SmartCard.connect(protocol);
 
         // 1PAY.SYS.DDF01
         byte[] pseAid = new byte[] { (byte) 0x31, (byte) 0x50, (byte) 0x41, (byte) 0x59, (byte) 0x2E, (byte) 0x53, (byte) 0x59, (byte) 0x53, (byte) 0x2E, (byte) 0x44, (byte) 0x44, (byte) 0x46, (byte) 0x30, (byte) 0x31 };
@@ -54,25 +58,50 @@ public class SimulatorTest {
         SmartCard.setLogging(true);
     }
 
+    /**
+     * Contact transaction with T=1, response data is sent with the command.
+     */
     @Test
-    public void simulatorEndToEndTransactionTest() {
-        SimulatorTest.entryPoint(new SimulatorTest());
+    public void simulatorEndToEndTransactionTest() throws CardException {
+        setup(SmartCard.PROTOCOL_T1);
+        SimulatorTest.entryPoint(this);
+    }
+
+    /**
+     * Contact transaction with T=0, response data of case 4 commands is sent with GET RESPONSE.
+     */
+    @Test
+    public void simulatorEndToEndTransactionT0Test() throws CardException {
+        setup(SmartCard.PROTOCOL_T0);
+        SimulatorTest.entryPoint(this);
+        assertTrue(getResponseCount > 0);
     }
 
     /**
      * Mastercard contactless (Kernel 2): Relay Resistance Protocol, enciphered offline PIN and CDA.
      */
     @Test
-    public void simulatorEndToEndMastercardContactlessTransactionTest() {
-        SimulatorTest.mastercardContactlessEntryPoint(new SimulatorTest());
+    public void simulatorEndToEndMastercardContactlessTransactionTest() throws CardException {
+        setup(SmartCard.PROTOCOL_CONTACTLESS);
+        SimulatorTest.mastercardContactlessEntryPoint(this);
+    }
+
+    /**
+     * Fake Mastercard contactless card for a demonstration: the card deciphers and shows the PIN entered on the terminal.
+     */
+    @Test
+    public void simulatorEndToEndFakeMastercardContactlessPinTest() throws CardException {
+        setup(SmartCard.PROTOCOL_CONTACTLESS);
+        SimulatorTest.fakeMastercardContactlessPinEntryPoint(this);
     }
 
     /**
      * Visa contactless (Kernel 3): qVSDC with fDDA and no CVM.
      */
     @Test
-    public void simulatorEndToEndVisaContactlessTransactionTest() {
-        SimulatorTest.visaContactlessEntryPoint(new SimulatorTest());
+    public void simulatorEndToEndVisaContactlessTransactionTest() throws CardException {
+        setup(SmartCard.PROTOCOL_CONTACTLESS);
+        SimulatorTest.visaContactlessEntryPoint(this);
     }
 
     private void printAsHex(String type, byte[] buf) {
@@ -87,6 +116,10 @@ public class SimulatorTest {
      * Proxy request from Rust library to simulated JavaCard.
      */
     public void sendApduRequest(byte[] requestApdu) {
+        if (requestApdu[1] == (byte) 0xC0) {
+            getResponseCount++;
+        }
+
         try {
             ResponseAPDU response = SmartCard.transmitCommand(requestApdu);
             sendApduResponse(response.getBytes());
