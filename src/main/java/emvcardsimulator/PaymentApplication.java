@@ -9,6 +9,8 @@ import javacard.security.CryptoException;
 import javacard.security.DESKey;
 import javacard.security.KeyBuilder;
 import javacard.security.MessageDigest;
+import javacard.security.PrivateKey;
+import javacard.security.RSAPrivateCrtKey;
 import javacard.security.RSAPrivateKey;
 import javacardx.crypto.Cipher;
 
@@ -18,6 +20,7 @@ public class PaymentApplication extends EmvApplet {
         (new PaymentApplication(buffer, offset, length)).register();
     }
 
+    // Default PIN Try Limit
     private static final byte PIN_TRY_LIMIT = (byte) 3;
 
     // Cryptogram Information Data cryptogram types
@@ -97,6 +100,11 @@ public class PaymentApplication extends EmvApplet {
         (byte) 0x9F, (byte) 0x61, (byte) 0x9F, (byte) 0x60, (byte) 0x9F, (byte) 0x36
     };
 
+    private static final byte[] DEFAULT_GENERATE_AC_TEMPLATE = {
+        (byte) 0x9F, (byte) 0x27, (byte) 0x9F, (byte) 0x36, (byte) 0x9F, (byte) 0x26, (byte) 0x9F, (byte) 0x10
+    };
+    private static final byte[] DEFAULT_DDA_TEMPLATE = { (byte) 0x9F, (byte) 0x4B };
+
     // ARPC generation methods (EMV Book 2, 8.2 Issuer Authentication)
     private static final byte ARPC_METHOD_1 = (byte) 0x01;
     private static final byte ARPC_METHOD_2 = (byte) 0x02;
@@ -118,9 +126,11 @@ public class PaymentApplication extends EmvApplet {
 
     private TagTemplate responseTemplateGenerateAcCda;
 
-    private RSAPrivateKey rsaPrivateKey = null;
+    // ICC private key: modulus and private exponent, or Chinese Remainder Theorem components
+    private PrivateKey rsaPrivateKey = null;
     private short rsaPrivateKeyByteSize = 0;
     private byte[] pinBlock = null;
+    private byte pinTryLimit = PIN_TRY_LIMIT;
     private boolean useRandom = true;
 
     // ICC Application Cryptogram Master Key MK_AC, Application Cryptogram is static tag 9F26 when not set
@@ -157,7 +167,7 @@ public class PaymentApplication extends EmvApplet {
     private byte[] relayResistanceData;
 
     // Separate ICC PIN Encipherment private key (EMV Book 2, 7.1), ICC private key is used when not set
-    private RSAPrivateKey pinRsaPrivateKey = null;
+    private PrivateKey pinRsaPrivateKey = null;
     private short pinRsaPrivateKeyByteSize = 0;
 
     // Card risk management (EMV Book 3, Annex C Common Core Definitions)
@@ -227,10 +237,10 @@ public class PaymentApplication extends EmvApplet {
                 break;
             // ICC RSA KEY PRIVATE EXPONENT
             case 0x0005:
-                if (rsaPrivateKey == null) {
+                if (!(rsaPrivateKey instanceof RSAPrivateKey) || rsaPrivateKey instanceof RSAPrivateCrtKey) {
                     ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 }
-                rsaPrivateKey.setExponent(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                ((RSAPrivateKey) rsaPrivateKey).setExponent(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
                 break;
             // FALLBACK READ RECORD
             case 0x0006:
@@ -306,14 +316,59 @@ public class PaymentApplication extends EmvApplet {
                 break;
             // ICC PIN ENCIPHERMENT RSA KEY PRIVATE EXPONENT
             case 0x0010:
-                if (pinRsaPrivateKey == null) {
+                if (!(pinRsaPrivateKey instanceof RSAPrivateKey)) {
                     ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
                 }
-                pinRsaPrivateKey.setExponent(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                ((RSAPrivateKey) pinRsaPrivateKey).setExponent(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
                 break;
             // PUT DATA TAGS: tag entries that the terminal may write with PUT DATA, e.g. Data Storage or balance
             case 0x0011:
                 putDataTags.setData(buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
+                break;
+            // PERSONALIZATION INTERFACE of the following EMV tags, records and GET PROCESSING OPTIONS response template:
+            // '00' both interfaces, '01' contact only, '02' contactless only. Interface specific tags take precedence.
+            case 0x0012:
+                if (dataLength != (short) 1) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                if (buf[ISO7816.OFFSET_CDATA] != EmvTag.SCOPE_ANY && buf[ISO7816.OFFSET_CDATA] != EmvTag.SCOPE_CONTACT
+                    && buf[ISO7816.OFFSET_CDATA] != EmvTag.SCOPE_CONTACTLESS) {
+                    ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                }
+                dataStore.scope = buf[ISO7816.OFFSET_CDATA];
+                break;
+            // ICC RSA KEY CHINESE REMAINDER THEOREM COMPONENTS (EMV Card Personalization Specification DGIs '8201' - '8205'):
+            // prime factor p, the key length is twice the length of p
+            case 0x0013:
+                rsaPrivateKeyByteSize = (short) (2 * dataLength);
+                rsaPrivateKey = (PrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_CRT_PRIVATE, rsaKeyLength(rsaPrivateKeyByteSize), false);
+                ((RSAPrivateCrtKey) rsaPrivateKey).setP(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                break;
+            // prime factor q
+            case 0x0014:
+                requireRsaPrivateCrtKey().setQ(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                break;
+            // d mod (p - 1)
+            case 0x0015:
+                requireRsaPrivateCrtKey().setDP1(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                break;
+            // d mod (q - 1)
+            case 0x0016:
+                requireRsaPrivateCrtKey().setDQ1(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                break;
+            // q^-1 mod p
+            case 0x0017:
+                requireRsaPrivateCrtKey().setPQ(buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+                break;
+            // PIN TRY LIMIT, the PIN Try Counter (9F17) is reset to it when the PIN is set or verified successfully
+            case 0x0018:
+                if (dataLength != (short) 1) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                if (buf[ISO7816.OFFSET_CDATA] <= (byte) 0 || buf[ISO7816.OFFSET_CDATA] > (byte) 0x0F) {
+                    ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                }
+                pinTryLimit = buf[ISO7816.OFFSET_CDATA];
                 break;
             default:
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
@@ -323,29 +378,38 @@ public class PaymentApplication extends EmvApplet {
     }
 
     /**
-     * Build RSA private key with the modulus from command data.
+     * Java Card RSA key length of a key of byteSize bytes.
      */
-    private static RSAPrivateKey buildRsaPrivateKey(byte[] buf, short modulusLength) {
-        short keyLength = (short) (modulusLength * 8);
-        switch (keyLength) {
+    private static short rsaKeyLength(short byteSize) {
+        // XXX. JCardSim doesn't do "throw new CryptoException(CryptoException.ILLEGAL_VALUE)" as specified in the Java Card documentation. I.e. Sim allows any key size but JavaCard needs specific, hence keyLength is determined.
+        switch ((short) (byteSize * 8)) {
+            case (short) 896:
+                return KeyBuilder.LENGTH_RSA_896;
             case (short) 1024:
-                keyLength = KeyBuilder.LENGTH_RSA_1024;
-                break;
+                return KeyBuilder.LENGTH_RSA_1024;
             case (short) 1280:
-                keyLength = KeyBuilder.LENGTH_RSA_1280;
-                break;
+                return KeyBuilder.LENGTH_RSA_1280;
             case (short) 1536:
-                keyLength = KeyBuilder.LENGTH_RSA_1536;
-                break;
+                return KeyBuilder.LENGTH_RSA_1536;
             case (short) 1984:
-                keyLength = KeyBuilder.LENGTH_RSA_1984;
-                break;
+                return KeyBuilder.LENGTH_RSA_1984;
             default:
                 throw new CryptoException(CryptoException.ILLEGAL_USE);
         }
+    }
 
-        // XXX. JCardSim doesn't do "throw new CryptoException(CryptoException.ILLEGAL_VALUE)" as specified in the Java Card documentation. I.e. Sim allows any key size but JavaCard needs specific, hence keyLength is determined.
-        RSAPrivateKey key = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, keyLength, false);
+    private RSAPrivateCrtKey requireRsaPrivateCrtKey() {
+        if (!(rsaPrivateKey instanceof RSAPrivateCrtKey)) {
+            ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+        return (RSAPrivateCrtKey) rsaPrivateKey;
+    }
+
+    /**
+     * Build RSA private key with the modulus from command data.
+     */
+    private static RSAPrivateKey buildRsaPrivateKey(byte[] buf, short modulusLength) {
+        RSAPrivateKey key = (RSAPrivateKey) KeyBuilder.buildKey(KeyBuilder.TYPE_RSA_PRIVATE, rsaKeyLength(modulusLength), false);
         key.clearKey();
 
         key.setModulus(buf, (short) ISO7816.OFFSET_CDATA, modulusLength);
@@ -419,6 +483,11 @@ public class PaymentApplication extends EmvApplet {
         cdol1Data = new byte[255];
         cdol2Data = new byte[255];
 
+        // GENERATE AC response: Cryptogram Information Data, ATC, Application Cryptogram and Issuer Application Data (EMV Book 3, 6.5.5.4)
+        responseTemplateGenerateAc.setData(DEFAULT_GENERATE_AC_TEMPLATE, (short) 0, (byte) DEFAULT_GENERATE_AC_TEMPLATE.length);
+        // INTERNAL AUTHENTICATE response: Signed Dynamic Application Data (EMV Book 3, 6.5.9.4)
+        responseTemplateDda.setData(DEFAULT_DDA_TEMPLATE, (short) 0, (byte) DEFAULT_DDA_TEMPLATE.length);
+
         responseTemplateGenerateAcCda = new TagTemplate();
         responseTemplateComputeCryptographicChecksum = new TagTemplate();
         responseTemplateComputeCryptographicChecksum.setData(DEFAULT_COMPUTE_CRYPTOGRAPHIC_CHECKSUM_TEMPLATE, (short) 0,
@@ -479,13 +548,13 @@ public class PaymentApplication extends EmvApplet {
         tmpBuffer[0] = (byte) (0x20 | digitCount);
         Util.arrayCopy(tmpBuffer, (short) 0, pinBlock, (short) 0, (short) 8);
 
-        setPinTryCounter(PIN_TRY_LIMIT);
+        setPinTryCounter(pinTryLimit);
     }
 
     private byte getPinTryCounter() {
         EmvTag pinTryCounterTag = EmvTag.findTag((short) 0x9F17);
         if (pinTryCounterTag == null || pinTryCounterTag.getLength() == (byte) 0) {
-            return PIN_TRY_LIMIT;
+            return pinTryLimit;
         }
 
         return pinTryCounterTag.getData()[0];
@@ -523,6 +592,11 @@ public class PaymentApplication extends EmvApplet {
     private void incrementApplicationTransactionCounter() {
         short applicationTransactionCounterTagId = (short) 0x9F36;
         EmvTag atcTag = EmvTag.findTag(applicationTransactionCounterTagId);
+        // ATC is zero before the first transaction
+        if (atcTag == null) {
+            Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 2, (byte) 0x00);
+            atcTag = EmvTag.setTag(applicationTransactionCounterTagId, tmpBuffer, (short) 0, (byte) 2);
+        }
         if (atcTag != null) {
             short applicationTransactionCounter = Util.getShort(atcTag.getData(), (short) 0);
 
@@ -1585,14 +1659,20 @@ public class PaymentApplication extends EmvApplet {
         transactionState[OFFSET_PREVIOUS_RISK_STATE] = riskState;
         transactionState[OFFSET_PREVIOUS_SCRIPT_COMMAND_COUNT] = lastScriptCommandCount;
 
-        if (cryptogramInGetProcessingOptions) {
+        TagTemplate responseTemplate = responseTemplateGetProcessingOptions;
+        if (isContactlessInterface() && responseTemplateGetProcessingOptionsContactless.getLength() != (byte) 0) {
+            responseTemplate = responseTemplateGetProcessingOptionsContactless;
+        }
+
+        // qVSDC is a contactless transaction, EMV Contactless Book C-3
+        if (cryptogramInGetProcessingOptions && isContactlessInterface()) {
             generateGetProcessingOptionsCryptogram(buf);
-            sendResponseTemplate(apdu, buf, responseTemplateGetProcessingOptions);
+            sendResponseTemplate(apdu, buf, responseTemplate);
             transactionState[OFFSET_STATE] = STATE_COMPLETED;
             return;
         }
 
-        sendResponseTemplate(apdu, buf, responseTemplateGetProcessingOptions);
+        sendResponseTemplate(apdu, buf, responseTemplate);
 
         transactionState[OFFSET_STATE] = STATE_GPO_DONE;
     }
@@ -1861,7 +1941,7 @@ public class PaymentApplication extends EmvApplet {
         } else {
             // Enciphered PIN block, EMV Book 2, 7.2 PIN Encipherment and Verification.
             // ICC PIN Encipherment Private Key is used when set, otherwise ICC Private Key (EMV Book 2, 7.1)
-            RSAPrivateKey pinKey = pinRsaPrivateKey;
+            PrivateKey pinKey = pinRsaPrivateKey;
             short pinKeyByteSize = pinRsaPrivateKeyByteSize;
             if (pinKey == null || !pinKey.isInitialized()) {
                 requireRsaPrivateKey();
@@ -1907,7 +1987,7 @@ public class PaymentApplication extends EmvApplet {
             EmvApplet.logAndThrow((short) (0x63C0 | pinTryCounter));
         }
 
-        setPinTryCounter(PIN_TRY_LIMIT);
+        setPinTryCounter(pinTryLimit);
         setVerificationEvent(VERIFICATION_OFFLINE_PIN_SUCCESSFUL, true);
 
         EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
@@ -2082,7 +2162,7 @@ public class PaymentApplication extends EmvApplet {
                 if (p1p2 != (short) 0x0000) {
                     EmvApplet.logAndThrow(ISO7816.SW_INCORRECT_P1P2);
                 }
-                setPinTryCounter(PIN_TRY_LIMIT);
+                setPinTryCounter(pinTryLimit);
                 break;
             // Payment system specific commands, placeholders that accept the command without changing data
             case CMD_PUT_DATA:

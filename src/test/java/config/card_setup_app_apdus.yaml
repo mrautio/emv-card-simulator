@@ -54,6 +54,13 @@
 # RECOVER AC of a torn first GENERATE AC is supported when DRDOL tag 9F51 exists.
 # Transaction log is written when Log Entry 9F4D (SFI, number of records) and Log Format 9F4F exist.
 # Tags of three bytes are set with P1 P2 '00 00' and the tag before the value, e.g. '80 01 00 00 05 DF 81 01 AA BB'.
+# Data objects in the value of a constructed tag, e.g. FCI Proprietary Template A5, are card data as well.
+# Record as is: '80 04' || record number || SFI << 3 | 4 || Lc || '70' record template, its data objects are card data.
+# Interface of the following tags and GET PROCESSING OPTIONS response template: '80 00 00 12 01' || '00' both (default),
+# '01' contact or '02' contactless, an interface specific tag takes precedence over a tag of both interfaces.
+# ICC private key as CRT components: p '80 00 00 13', q '80 00 00 14', d mod (p - 1) '80 00 00 15', d mod (q - 1) '80 00 00 16',
+# q^-1 mod p '80 00 00 17'. PIN Try Limit (default 3): '80 00 00 18 01' || limit.
+# Default templates: FCI 84 A5, GENERATE AC 9F27 9F36 9F26 9F10, INTERNAL AUTHENTICATE 9F4B. ATC starts from zero when 9F36 is not set.
 # Setup tag templates
 - req: '80 02 00 01 04 00 82 00 94'
   res: '90 00'

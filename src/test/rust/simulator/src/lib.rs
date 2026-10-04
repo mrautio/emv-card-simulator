@@ -1,5 +1,5 @@
 use hex;
-use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JValue};
+use jni::objects::{GlobalRef, JByteArray, JClass, JObject, JString, JValue};
 use jni::{JNIEnv, JavaVM};
 use log::LevelFilter;
 use log::{info, trace};
@@ -30,6 +30,19 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_sendApduResponse(
     _class: JClass,
     response_apdu: JByteArray,
 ) {
+    set_apdu_response(env, response_apdu);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_emvcardsimulator_PrivateCardTest_sendApduResponse(
+    env: JNIEnv,
+    _class: JClass,
+    response_apdu: JByteArray,
+) {
+    set_apdu_response(env, response_apdu);
+}
+
+fn set_apdu_response(env: JNIEnv, response_apdu: JByteArray) {
     let mut apdu_response = APDU_RESPONSE.lock().unwrap();
     apdu_response.clear();
     apdu_response.extend_from_slice(&env.convert_byte_array(&response_apdu).unwrap()[..]);
@@ -157,15 +170,14 @@ fn triple_des_encrypt(double_length_key: &[u8], data: &[u8]) -> Vec<u8> {
 }
 
 /// Application Cryptogram Session Key, EMV Book 2 A1.3.1 Common Session Key Derivation Option
-fn application_cryptogram_session_key(atc: &[u8]) -> Vec<u8> {
-    let master_key = hex::decode(AC_MASTER_KEY).unwrap();
+fn application_cryptogram_session_key(master_key: &[u8], atc: &[u8]) -> Vec<u8> {
 
     let mut diversification = vec![0u8; 16];
     diversification[0..2].copy_from_slice(atc);
     diversification[2] = 0xF0;
     diversification[8..10].copy_from_slice(atc);
     diversification[10] = 0x0F;
-    triple_des_encrypt(&master_key, &diversification)
+    triple_des_encrypt(master_key, &diversification)
 }
 
 /// ISO/IEC 9797-1 MAC Algorithm 3 with padding method 2, EMV Book 2 A1.2.1
@@ -197,11 +209,12 @@ fn retail_mac(double_length_key: &[u8], data: &[u8]) -> Vec<u8> {
 /// Issuer Authentication Data (tag 91) with ARPC Method 1 as the issuer would generate it.
 /// EMV Book 2, A1.3.1 session key derivation and 8.2.1 ARPC Method 1: ARPC || ARC
 fn issuer_authentication_data(
+    master_key: &[u8],
     arqc: &[u8],
     atc: &[u8],
     authorisation_response_code: &[u8],
 ) -> Vec<u8> {
-    let session_key = application_cryptogram_session_key(atc);
+    let session_key = application_cryptogram_session_key(master_key, atc);
 
     let mut y = arqc.to_vec();
     y[0] ^= authorisation_response_code[0];
@@ -209,6 +222,24 @@ fn issuer_authentication_data(
 
     let mut result = triple_des_encrypt(&session_key, &y);
     result.extend_from_slice(authorisation_response_code);
+    result
+}
+
+/// Issuer Authentication Data (tag 91) with ARPC Method 2 as the issuer would generate it.
+/// EMV Book 2, A1.3.1 session key derivation and 8.2.2 ARPC Method 2: ARPC (4) || CSU (4), without Proprietary Authentication Data
+fn issuer_authentication_data_method_2(
+    master_key: &[u8],
+    arqc: &[u8],
+    atc: &[u8],
+    card_status_update: &[u8],
+) -> Vec<u8> {
+    let session_key = application_cryptogram_session_key(master_key, atc);
+
+    let mut data = arqc.to_vec();
+    data.extend_from_slice(card_status_update);
+
+    let mut result = retail_mac(&session_key, &data)[0..4].to_vec();
+    result.extend_from_slice(card_status_update);
     result
 }
 
@@ -228,6 +259,7 @@ const MASTERCARD_CRYPTOGRAM_VERSION_14: (u8, usize) = (0x14, 1);
 /// over CDOL1 related data || AIP || ATC || Issuer Application Data
 fn verify_authorisation_request_cryptogram(
     connection: &EmvConnection,
+    master_key: &[u8],
     cdol1_data: &[u8],
     cryptogram_version: (u8, usize),
 ) {
@@ -244,7 +276,7 @@ fn verify_authorisation_request_cryptogram(
     data.extend_from_slice(aip);
     data.extend_from_slice(atc);
     data.extend_from_slice(issuer_application_data);
-    let expected_arqc = retail_mac(&application_cryptogram_session_key(atc), &data);
+    let expected_arqc = retail_mac(&application_cryptogram_session_key(master_key, atc), &data);
 
     assert_eq!(
         connection.get_tag_value("9F26").unwrap(),
@@ -359,7 +391,12 @@ fn contact_transaction_with(
         let atc = connection.get_tag_value("9F36").unwrap().clone();
         connection.add_tag(
             "91",
-            issuer_authentication_data(&arqc, &atc, authorisation_response_code),
+            issuer_authentication_data(
+                &hex::decode(AC_MASTER_KEY).unwrap(),
+                &arqc,
+                &atc,
+                authorisation_response_code,
+            ),
         );
 
         connection.handle_issuer_authentication_data().unwrap();
@@ -532,6 +569,7 @@ fn mastercard_contactless_transaction_with(
     let cdol1_data = data_object_list_data(connection, "8C");
     verify_authorisation_request_cryptogram(
         connection,
+        &hex::decode(AC_MASTER_KEY).unwrap(),
         &cdol1_data,
         MASTERCARD_CRYPTOGRAM_VERSION_14,
     );
@@ -676,14 +714,30 @@ fn visa_contactless_transaction(connection: &mut EmvConnection) {
         CryptogramType::AuthorisationRequestCryptogram
     ));
 
-    verify_authorisation_request_cryptogram(connection, &cdol1_data, VISA_CRYPTOGRAM_VERSION_18);
+    verify_authorisation_request_cryptogram(
+        connection,
+        &hex::decode(AC_MASTER_KEY).unwrap(),
+        &cdol1_data,
+        VISA_CRYPTOGRAM_VERSION_18,
+    );
 }
 
 /// Run a transaction against the simulated card of the Java callback, a failure is thrown as an AssertionError
 fn run_transaction(
+    env: JNIEnv<'static>,
+    callback: JObject<'static>,
+    name: &str,
+    transaction: fn(&mut EmvConnection),
+) {
+    run_transaction_with_settings(env, callback, name, "../config/settings.yaml", transaction);
+}
+
+/// Run a transaction with the emvpt settings file against the simulated card of the Java callback
+fn run_transaction_with_settings(
     mut env: JNIEnv<'static>,
     callback: JObject<'static>,
     name: &str,
+    settings_file: &str,
     transaction: fn(&mut EmvConnection),
 ) {
     trace!("Simulator entry point called!");
@@ -699,7 +753,7 @@ fn run_transaction(
     info!("===== START: {} =====", name);
 
     let result = panic::catch_unwind(|| {
-        let mut connection = EmvConnection::new("../config/settings.yaml").unwrap();
+        let mut connection = EmvConnection::new(settings_file).unwrap();
         let smart_card_connection = JavaSmartCardConnection {};
         connection.interface = Some(&smart_card_connection);
 
@@ -807,6 +861,430 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_visaContactlessEntryP
         "Visa contactless transaction",
         visa_contactless_transaction,
     );
+}
+
+// Private test card (PrivateCardTest): setup file of the card and the PIN of the cardholder
+static PRIVATE_CARD_FILE: Mutex<String> = Mutex::new(String::new());
+static PRIVATE_CARD_PIN: Mutex<String> = Mutex::new(String::new());
+// emvpt settings of the private test cards, with the CA public keys of the cards
+const PRIVATE_SETTINGS_FILE: &str = "../../../../private/config/settings.yaml";
+
+const PPSE_AID: &[u8] = b"2PAY.SYS.DDF01";
+const PSE_AID: &[u8] = b"1PAY.SYS.DDF01";
+
+/// What the terminal, the issuer and the cardholder know of a private test card, from its setup file: application AIDs
+/// (the terminal list of AIDs), ICC Application Cryptogram Master Key and CDOL1 (issuer) and PIN (cardholder)
+struct PrivateCard {
+    file: String,
+    applications: Vec<Vec<u8>>,
+    master_key: Option<Vec<u8>>,
+    cdol1: Option<Vec<u8>>,
+}
+
+impl PrivateCard {
+    fn load() -> PrivateCard {
+        let file = PRIVATE_CARD_FILE.lock().unwrap().clone();
+        let setup: Vec<ApduRequestResponse> =
+            serde_yaml::from_str(&fs::read_to_string(&file).unwrap()).unwrap();
+
+        let mut card = PrivateCard {
+            file: file,
+            applications: Vec::new(),
+            master_key: None,
+            cdol1: None,
+        };
+        let mut pin = String::from("1234");
+        for apdu in setup {
+            let request = ApduRequestResponse::to_raw_vec(&apdu.req);
+            let data = &request[5..];
+            if request.starts_with(b"\x00\xA4\x04\x00") {
+                let aid = data.to_vec();
+                if aid != PPSE_AID && aid != PSE_AID && !card.applications.contains(&aid) {
+                    card.applications.push(aid);
+                }
+            } else if request.starts_with(b"\x80\x00\x00\x07\x10") && card.master_key.is_none() {
+                card.master_key = Some(data.to_vec());
+            } else if request.starts_with(b"\x80\x00\x00\x01") {
+                pin = hex::encode_upper(data).trim_end_matches('F').to_string();
+            } else if request.starts_with(b"\x80\x04") && card.cdol1.is_none() {
+                card.cdol1 = find_data_object(data, &[0x8C]);
+            }
+        }
+        *PRIVATE_CARD_PIN.lock().unwrap() = pin;
+
+        card
+    }
+}
+
+fn private_card_pin_entry() -> Result<String, ()> {
+    Ok(PRIVATE_CARD_PIN.lock().unwrap().clone())
+}
+
+/// Value of the first data object with the tag in BER-TLV coded data, constructed data objects are searched recursively
+fn find_data_object(data: &[u8], tag: &[u8]) -> Option<Vec<u8>> {
+    let mut i = 0;
+    while i < data.len() {
+        if data[i] == 0x00 || data[i] == 0xFF {
+            i += 1;
+            continue;
+        }
+        let tag_start = i;
+        i += 1;
+        if data[tag_start] & 0x1F == 0x1F {
+            while i < data.len() && data[i] & 0x80 != 0 {
+                i += 1;
+            }
+            i += 1;
+        }
+        let tag_end = i;
+        if i >= data.len() {
+            return None;
+        }
+        let mut length = data[i] as usize;
+        i += 1;
+        if length == 0x81 {
+            length = data[i] as usize;
+            i += 1;
+        } else if length == 0x82 {
+            length = ((data[i] as usize) << 8) | data[i + 1] as usize;
+            i += 2;
+        }
+        if i + length > data.len() {
+            return None;
+        }
+        let value = &data[i..i + length];
+        if &data[tag_start..tag_end] == tag {
+            return Some(value.to_vec());
+        }
+        if data[tag_start] & 0x20 != 0 {
+            if let Some(found) = find_data_object(value, tag) {
+                return Some(found);
+            }
+        }
+        i += length;
+    }
+    None
+}
+
+/// Length of a data object in a Data Object List
+fn data_object_list_entry_length(dol: &[u8], search_tag: &[u8]) -> Option<usize> {
+    let mut i = 0;
+    while i < dol.len() {
+        let tag_start = i;
+        i += 1;
+        if dol[tag_start] & 0x1F == 0x1F {
+            while dol[i] & 0x80 != 0 {
+                i += 1;
+            }
+            i += 1;
+        }
+        let length = dol[i] as usize;
+        if &dol[tag_start..i] == search_tag {
+            return Some(length);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn cryptogram_name(cryptogram_type: CryptogramType) -> &'static str {
+    match cryptogram_type {
+        CryptogramType::ApplicationAuthenticationCryptogram => "AAC",
+        CryptogramType::AuthorisationRequestCryptogram => "ARQC",
+        CryptogramType::TransactionCertificate => "TC",
+    }
+}
+
+/// Issuer verification of the ARQC when the card has Visa Cryptogram Version Number 18 ('06' || DKI || '12' || CVR in Issuer
+/// Application Data), returns a description of the result
+fn verify_private_card_arqc(connection: &EmvConnection, card: &PrivateCard) -> String {
+    let issuer_application_data = connection.get_tag_value("9F10").unwrap().clone();
+    let master_key = match &card.master_key {
+        Some(key) => key,
+        None => return "ARQC not verified, no ICC Application Cryptogram Master Key".to_string(),
+    };
+    if issuer_application_data.len() != 7
+        || issuer_application_data[0] != 0x06
+        || issuer_application_data[2] != VISA_CRYPTOGRAM_VERSION_18.0
+    {
+        return format!(
+            "ARQC not verified, Issuer Application Data {} is not CVN 18",
+            hex::encode_upper(&issuer_application_data)
+        );
+    }
+
+    // CDOL1 of the card, a qVSDC reader does not necessarily read the record with it
+    let cdol1 = match &card.cdol1 {
+        Some(cdol1) => cdol1,
+        None => return "ARQC not verified, no CDOL1".to_string(),
+    };
+    let cdol1_data = if connection.contactless {
+        cdol1_data_from_pdol_data(connection, cdol1)
+    } else {
+        DataObjectList::process_data_object_list(connection, cdol1)
+            .unwrap()
+            .get_tag_list_tag_values(connection)
+    };
+    verify_authorisation_request_cryptogram(
+        connection,
+        master_key,
+        &cdol1_data,
+        VISA_CRYPTOGRAM_VERSION_18,
+    );
+    "ARQC verified (CVN 18)".to_string()
+}
+
+/// qVSDC Application Cryptogram input of the simulator: PDOL related data of the GET PROCESSING OPTIONS command arranged as CDOL1
+/// related data, data objects that are not in the PDOL are zero filled
+fn cdol1_data_from_pdol_data(connection: &EmvConnection, cdol1: &[u8]) -> Vec<u8> {
+    let pdol = connection.get_tag_value("9F38").cloned().unwrap_or_default();
+    let commands = SENT_COMMANDS.lock().unwrap().clone();
+    let get_processing_options = commands
+        .iter()
+        .rev()
+        .find(|c| c.starts_with(b"\x80\xA8"))
+        .expect("GET PROCESSING OPTIONS");
+    // Command data: Command Template '83' || length || PDOL related data
+    let pdol_data = &get_processing_options[7..7 + get_processing_options[6] as usize];
+
+    let entries = |dol: &[u8]| -> Vec<(Vec<u8>, usize)> {
+        let mut result = Vec::new();
+        let mut i = 0;
+        while i < dol.len() {
+            let tag_start = i;
+            i += 1;
+            if dol[tag_start] & 0x1F == 0x1F {
+                while dol[i] & 0x80 != 0 {
+                    i += 1;
+                }
+                i += 1;
+            }
+            result.push((dol[tag_start..i].to_vec(), dol[i] as usize));
+            i += 1;
+        }
+        result
+    };
+
+    let mut data = Vec::new();
+    for (tag, length) in entries(cdol1) {
+        let mut offset = 0;
+        let mut value = vec![0x00; length];
+        for (pdol_tag, pdol_length) in entries(&pdol) {
+            if pdol_tag == tag {
+                let copy_length = length.min(pdol_length);
+                value[..copy_length].copy_from_slice(&pdol_data[offset..offset + copy_length]);
+                break;
+            }
+            offset += pdol_length;
+        }
+        data.extend_from_slice(&value);
+    }
+    data
+}
+
+/// Online authorisation approved by the issuer: Authorisation Response Code '00' and Issuer Authentication Data with the ARPC
+/// method given by the length of Issuer Authentication Data in CDOL2 (EMV Book 2, 8.2), CSU of Method 2 is zero
+fn private_card_online_authorisation(connection: &mut EmvConnection, card: &PrivateCard) -> String {
+    connection.add_tag("8A", AUTHORISATION_RESPONSE_CODE.to_vec());
+
+    let cdol2 = connection.get_tag_value("8D").cloned().unwrap_or_default();
+    let issuer_authentication_data_length = data_object_list_entry_length(&cdol2, &[0x91]);
+    let result = match (&card.master_key, issuer_authentication_data_length) {
+        (Some(master_key), Some(length)) => {
+            let arqc = connection.get_tag_value("9F26").unwrap().clone();
+            let atc = connection.get_tag_value("9F36").unwrap().clone();
+            let (data, method) = if length == 10 {
+                (issuer_authentication_data(master_key, &arqc, &atc, AUTHORISATION_RESPONSE_CODE), "ARPC Method 1")
+            } else {
+                (issuer_authentication_data_method_2(master_key, &arqc, &atc, &[0x00; 4]), "ARPC Method 2")
+            };
+            connection.add_tag("91", data);
+            method
+        }
+        (None, _) => "no ARPC, no ICC Application Cryptogram Master Key",
+        (Some(master_key), None) if connection.icc.capabilities.issuer_authentication => {
+            // EXTERNAL AUTHENTICATE, the card has the simulator default ARPC Method 1 as the profile does not give the method
+            let arqc = connection.get_tag_value("9F26").unwrap().clone();
+            let atc = connection.get_tag_value("9F36").unwrap().clone();
+            let data = issuer_authentication_data(master_key, &arqc, &atc, AUTHORISATION_RESPONSE_CODE);
+            connection.add_tag("91", data);
+            "ARPC Method 1 in EXTERNAL AUTHENTICATE"
+        }
+        (_, None) => "no ARPC, no Issuer Authentication Data in CDOL2",
+    };
+
+    connection.handle_issuer_authentication_data().unwrap();
+    assert!(
+        !connection.settings.terminal.tvr.issuer_authentication_failed,
+        "Issuer authentication failed"
+    );
+
+    result.to_string()
+}
+
+fn private_card_tvr(connection: &EmvConnection) -> String {
+    let tvr = &connection.settings.terminal.tvr;
+    let mut flags = Vec::new();
+    for (set, name) in [
+        (tvr.offline_data_authentication_was_not_performed, "ODA not performed"),
+        (tvr.sda_failed, "SDA failed"),
+        (tvr.dda_failed, "DDA failed"),
+        (tvr.cda_failed, "CDA failed"),
+        (tvr.icc_data_missing, "ICC data missing"),
+        (tvr.cardholder_verification_was_not_successful, "CVM not successful"),
+        (tvr.unrecognised_cvm, "unrecognised CVM"),
+        (tvr.online_pin_entered, "online PIN entered"),
+        (tvr.expired_application, "expired application"),
+        (tvr.requested_service_not_allowed_for_card_product, "service not allowed"),
+    ] {
+        if set {
+            flags.push(name);
+        }
+    }
+    format!("TVR: {}", if flags.is_empty() { "-".to_string() } else { flags.join(", ") })
+}
+
+/// Contact transaction of a private test card. The card has no PSE, so the terminal builds the candidate list with its list of
+/// AIDs (EMV Book 1, 12.3.3), the terminal list is the AIDs of the card. The application with the highest priority is selected
+/// (EMV Book 1, 12.4). An ARQC is authorised online and completed with the second GENERATE AC.
+fn private_card_contact_transaction(connection: &mut EmvConnection) {
+    let card = PrivateCard::load();
+    setup_connection(connection).unwrap();
+    connection.pin_callback = Some(&private_card_pin_entry);
+
+    execute_setup_apdus(connection, &[&card.file]);
+
+    let mut candidates: Vec<(u8, EmvApplication)> = Vec::new();
+    for aid in &card.applications {
+        let mut select = b"\x00\xA4\x04\x00".to_vec();
+        select.push(aid.len() as u8);
+        select.extend_from_slice(aid);
+        select.push(0x00);
+        let (response_trailer, response_data) = connection.send_apdu(&select);
+        if response_trailer != b"\x90\x00" || response_data.is_empty() {
+            info!("Application {} not available: {:02X?}", hex::encode_upper(aid), response_trailer);
+            continue;
+        }
+        let priority = find_data_object(&response_data, &[0x87]).unwrap_or_default();
+        // Application Priority Indicator b4-b1, '0' is no priority
+        let order = match priority.first() {
+            Some(p) if p & 0x0F != 0 => p & 0x0F,
+            _ => 0x10,
+        };
+        candidates.push((
+            order,
+            EmvApplication {
+                aid: aid.clone(),
+                label: find_data_object(&response_data, &[0x50]).unwrap_or_default(),
+                priority: priority,
+                kernel_identifier: None,
+            },
+        ));
+    }
+    assert!(!candidates.is_empty(), "No application to select");
+    candidates.sort_by_key(|(order, _)| *order);
+    let application = candidates[0].1.clone();
+
+    connection.handle_select_payment_application(&application).unwrap();
+    connection.start_transaction(&application).expect("Transaction start");
+    connection.handle_card_verification_methods().expect("Cardholder verification");
+    connection.handle_terminal_risk_management().expect("Terminal risk management");
+    connection.handle_offline_data_authentication().expect("Offline data authentication");
+    connection.handle_terminal_action_analysis().expect("Terminal action analysis");
+
+    let first = connection.handle_1st_generate_ac().expect("First GENERATE AC");
+    let mut result = format!(
+        "{} AIP {} CVM Results {} {}, first GENERATE AC {}",
+        hex::encode_upper(&application.aid),
+        hex::encode_upper(connection.get_tag_value("82").unwrap()),
+        connection.get_tag_value("9F34").map_or("-".to_string(), hex::encode_upper),
+        private_card_tvr(connection),
+        cryptogram_name(first)
+    );
+
+    if let CryptogramType::AuthorisationRequestCryptogram = first {
+        result += &format!(", {}", verify_private_card_arqc(connection, &card));
+        result += &format!(", {}", private_card_online_authorisation(connection, &card));
+        let second = connection.handle_2nd_generate_ac().expect("Second GENERATE AC");
+        result += &format!(", second GENERATE AC {}", cryptogram_name(second));
+        assert!(
+            matches!(second, CryptogramType::TransactionCertificate),
+            "Online approved transaction not completed with TC: {}",
+            result
+        );
+    }
+
+    info!("RESULT contact: {}", result);
+}
+
+/// Contactless transaction of a private test card: PPSE, qVSDC (EMV Contactless Book C-3) with the cryptogram in the GET PROCESSING
+/// OPTIONS response, ARQC is verified by the issuer.
+fn private_card_contactless_transaction(connection: &mut EmvConnection) {
+    let card = PrivateCard::load();
+    setup_connection(connection).unwrap();
+    connection.contactless = true;
+    connection.pin_callback = Some(&private_card_pin_entry);
+
+    execute_setup_apdus(connection, &[&card.file]);
+    SENT_COMMANDS.lock().unwrap().clear();
+
+    let applications = connection
+        .handle_select_payment_system_environment()
+        .expect("PPSE");
+    let application = applications[0].clone();
+
+    connection.handle_select_payment_application(&application).unwrap();
+    connection.start_transaction(&application).expect("Transaction start");
+    connection.handle_terminal_risk_management().expect("Terminal risk management");
+    connection.handle_offline_data_authentication().expect("Offline data authentication");
+    connection.handle_terminal_action_analysis().expect("Terminal action analysis");
+
+    let cryptogram_in_gpo = connection.get_tag_value("9F26").is_some();
+    let first = connection.handle_1st_generate_ac().expect("Application Cryptogram");
+    let mut result = format!(
+        "{} AIP {} CTQ {} {}, {} {}",
+        hex::encode_upper(&application.aid),
+        hex::encode_upper(connection.get_tag_value("82").unwrap()),
+        connection.get_tag_value("9F6C").map_or("-".to_string(), hex::encode_upper),
+        private_card_tvr(connection),
+        if cryptogram_in_gpo { "GET PROCESSING OPTIONS" } else { "GENERATE AC" },
+        cryptogram_name(first)
+    );
+
+    if let CryptogramType::AuthorisationRequestCryptogram = first {
+        result += &format!(", {}", verify_private_card_arqc(connection, &card));
+    }
+
+    info!("RESULT contactless: {}", result);
+}
+
+fn set_private_card(env: &mut JNIEnv, setup_file: &JString) {
+    let file: String = env.get_string(setup_file).unwrap().into();
+    *PRIVATE_CARD_FILE.lock().unwrap() = file;
+}
+
+#[no_mangle]
+pub extern "system" fn Java_emvcardsimulator_PrivateCardTest_contactEntryPoint(
+    mut env: JNIEnv<'static>,
+    _class: JClass<'static>,
+    callback: JObject<'static>,
+    setup_file: JString<'static>,
+) {
+    set_private_card(&mut env, &setup_file);
+    let name = format!("Private card contact transaction {}", PRIVATE_CARD_FILE.lock().unwrap());
+    run_transaction_with_settings(env, callback, &name, PRIVATE_SETTINGS_FILE, private_card_contact_transaction);
+}
+
+#[no_mangle]
+pub extern "system" fn Java_emvcardsimulator_PrivateCardTest_contactlessEntryPoint(
+    mut env: JNIEnv<'static>,
+    _class: JClass<'static>,
+    callback: JObject<'static>,
+    setup_file: JString<'static>,
+) {
+    set_private_card(&mut env, &setup_file);
+    let name = format!("Private card contactless transaction {}", PRIVATE_CARD_FILE.lock().unwrap());
+    run_transaction_with_settings(env, callback, &name, PRIVATE_SETTINGS_FILE, private_card_contactless_transaction);
 }
 
 #[cfg(test)]

@@ -36,3 +36,6 @@ build
 
 # Needed for gradlew to function
 !gradle/wrapper/gradle-wrapper.jar
+
+# Private test card profiles and tools, not to be committed
+/private/

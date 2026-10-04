@@ -30,6 +30,14 @@ If you have all developer tools existing, or enter to `nix-shell`, then you can 
 gradle build
 ```
 
+## Private test cards
+
+Card setup APDU files in a git ignored `private/cards` directory are tested against [emvpt](https://github.com/mrautio/emvpt) with contact and contactless transactions, emvpt settings are in `private/config/settings.yaml`.
+
+```sh
+gradle testPrivateCards
+```
+
 ## Update dependencies
 
 Run the [GitHub Actions Workflow](https://github.com/mrautio/emv-card-simulator/actions/workflows/update-dependencies.yml).

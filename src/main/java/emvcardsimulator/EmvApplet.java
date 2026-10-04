@@ -45,6 +45,7 @@ public abstract class EmvApplet extends Applet {
     protected static final short CMD_SET_EMV_TAG_FUZZ          = (short) 0x8011;
     protected static final short CMD_SET_TAG_TEMPLATE          = (short) 0x8002;
     protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0x8003;
+    protected static final short CMD_SET_READ_RECORD_DATA      = (short) 0x8004;
     protected static final short CMD_FACTORY_RESET             = (short) 0x8005;
     protected static final short CMD_LOG_CONSUME               = (short) 0x8006;
     protected static final short CMD_FUZZ_RESET                = (short) 0x8007;
@@ -120,10 +121,12 @@ public abstract class EmvApplet extends Applet {
         logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
     }
 
-    protected EmvTag emvTags;
-    protected ReadRecord readRecords;
+    // EMV tags and records of this applet instance
+    protected DataStore dataStore;
 
     protected TagTemplate responseTemplateGetProcessingOptions;
+    // GET PROCESSING OPTIONS response of the contactless interface, responseTemplateGetProcessingOptions is used when not set
+    protected TagTemplate responseTemplateGetProcessingOptionsContactless;
     protected TagTemplate responseTemplateDda;
     protected TagTemplate responseTemplateGenerateAc;
     protected TagTemplate tag6fFci;
@@ -137,6 +140,8 @@ public abstract class EmvApplet extends Applet {
 
 
     protected short responseTemplateTag;
+
+    private static final byte[] DEFAULT_FCI_TEMPLATE = { (byte) 0x00, (byte) 0x84, (byte) 0x00, (byte) 0xA5 };
     protected boolean randomResponseSuffixData;
 
     /**
@@ -158,6 +163,9 @@ public abstract class EmvApplet extends Applet {
                 return true;
             case CMD_SET_READ_RECORD_TEMPLATE:
                 processSetReadRecordTemplate(apdu, buf, receiveData(apdu, buf));
+                return true;
+            case CMD_SET_READ_RECORD_DATA:
+                processSetReadRecordData(apdu, buf, receiveData(apdu, buf));
                 return true;
             case CMD_FACTORY_RESET:
                 factoryReset(apdu, buf);
@@ -183,6 +191,7 @@ public abstract class EmvApplet extends Applet {
             case CMD_SET_EMV_TAG_FUZZ:
             case CMD_SET_TAG_TEMPLATE:
             case CMD_SET_READ_RECORD_TEMPLATE:
+            case CMD_SET_READ_RECORD_DATA:
             case CMD_FACTORY_RESET:
             case CMD_FUZZ_RESET:
             case CMD_LOG_CONSUME:
@@ -304,6 +313,14 @@ public abstract class EmvApplet extends Applet {
     }
 
     /**
+     * True for the contactless interface (ISO/IEC 14443 type A or B).
+     */
+    protected static boolean isContactlessInterface() {
+        byte media = (byte) (APDU.getProtocol() & APDU.PROTOCOL_MEDIA_MASK);
+        return media == APDU.PROTOCOL_MEDIA_CONTACTLESS_TYPE_A || media == APDU.PROTOCOL_MEDIA_CONTACTLESS_TYPE_B;
+    }
+
+    /**
      * Check Le of a case 2 command against the response length. Le 0x00 accepts any response length,
      * except with T=0 where P3 0x00 is 256 bytes.
      */
@@ -368,6 +385,9 @@ public abstract class EmvApplet extends Applet {
      * Process APDU command.
      */
     public void process(APDU apdu) {
+        DataStore.current = dataStore;
+        EmvTag.contactless = isContactlessInterface();
+
         byte[] buf = apdu.getBuffer();
 
         short cmd = getCommand(buf);
@@ -445,6 +465,7 @@ public abstract class EmvApplet extends Applet {
         responseTemplateTag = (short) 0x0077;
         randomResponseSuffixData = false;
         cardBlocked = false;
+        dataStore.scope = EmvTag.SCOPE_ANY;
 
         JCSystem.commitTransaction();
 
@@ -527,7 +548,12 @@ public abstract class EmvApplet extends Applet {
         return response != null && response == ApduLog.tail;
     }
 
+    /**
+     * Set EMV tag of the personalization interface scope. Data objects in the value of a constructed tag, e.g. FCI Proprietary Template (A5),
+     * are set as well.
+     */
     protected void processSetEmvTag(APDU apdu, byte[] buf, short dataLength) {
+        final byte scope = dataStore.scope;
         short tagId = Util.getShort(buf, ISO7816.OFFSET_P1);
         if (tagId == 0x0000) {
             // Tag of one to three bytes is given in the command data before the value, e.g. 'DF 81 01' || value
@@ -539,9 +565,19 @@ public abstract class EmvApplet extends Applet {
                 ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
             }
 
-            EmvTag.setTag(buf, (short) ISO7816.OFFSET_CDATA, buf, (short) (ISO7816.OFFSET_CDATA + tagLength), (byte) (dataLength - tagLength));
+            short valueOffset = (short) (ISO7816.OFFSET_CDATA + tagLength);
+            short valueLength = (short) (dataLength - tagLength);
+            EmvTag.setTag(scope, buf, (short) ISO7816.OFFSET_CDATA, buf, valueOffset, (byte) valueLength);
+            if (EmvTag.isConstructed(buf, (short) ISO7816.OFFSET_CDATA)) {
+                EmvTag.setTags(scope, buf, valueOffset, valueLength);
+            }
         } else {
-            EmvTag.setTag(tagId, buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
+            EmvTag.setTag(scope, tagId, buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
+            // First tag byte, P1 is '00' for a one byte tag
+            short tagOffset = (buf[ISO7816.OFFSET_P1] == (byte) 0x00) ? (short) ISO7816.OFFSET_P2 : (short) ISO7816.OFFSET_P1;
+            if (EmvTag.isConstructed(buf, tagOffset)) {
+                EmvTag.setTags(scope, buf, (short) ISO7816.OFFSET_CDATA, dataLength);
+            }
         }
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
@@ -572,9 +608,15 @@ public abstract class EmvApplet extends Applet {
 
         short templateId = Util.getShort(buf, ISO7816.OFFSET_P1);
 
+        // Only GET PROCESSING OPTIONS response has a contactless interface specific template
+        if (dataStore.scope == EmvTag.SCOPE_CONTACTLESS && templateId != (short) 0x0001) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
         switch (templateId) {
             case 0x0001:
-                template = responseTemplateGetProcessingOptions;
+                template = (dataStore.scope == EmvTag.SCOPE_CONTACTLESS)
+                    ? responseTemplateGetProcessingOptionsContactless : responseTemplateGetProcessingOptions;
                 break;
             case 0x0002:
                 template = responseTemplateDda;
@@ -620,6 +662,40 @@ public abstract class EmvApplet extends Applet {
         }
 
         ReadRecord.setRecord(readRecordId, buf, (short) ISO7816.OFFSET_CDATA, (byte) dataLength);
+
+        ISOException.throwIt(ISO7816.SW_NO_ERROR);
+    }
+
+    /**
+     * Set READ RECORD response as is: record template '70' with the data objects of the record, e.g. a personalization data
+     * grouping of the record (EMV Card Personalization Specification). P1 is the record number and P2 the SFI as in READ RECORD.
+     * Data objects of the record are set as EMV tags of the personalization interface scope for the card processing, e.g. CDOL1.
+     */
+    protected void processSetReadRecordData(APDU apdu, byte[] buf, short dataLength) {
+        short readRecordId = Util.getShort(buf, ISO7816.OFFSET_P1);
+        if (readRecordId == 0x0000) {
+            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+        }
+
+        // Record template: '70' || length (one byte or '81' || one byte) || data objects
+        short offset = (short) ISO7816.OFFSET_CDATA;
+        if (dataLength < (short) 2 || buf[offset] != (byte) 0x70) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        short valueOffset = (short) (offset + 2);
+        short valueLength = (short) (buf[(short) (offset + 1)] & 0x00FF);
+        if (valueLength == (short) 0x81 && dataLength > (short) 2) {
+            valueOffset++;
+            valueLength = (short) (buf[(short) (offset + 2)] & 0x00FF);
+        } else if (valueLength > (short) 0x7F) {
+            ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+        }
+        if ((short) (valueOffset - offset + valueLength) != dataLength) {
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+        }
+
+        EmvTag.setTags(dataStore.scope, buf, valueOffset, valueLength);
+        ReadRecord.setRecord(readRecordId, buf, offset, (byte) dataLength, true);
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
     }
@@ -764,11 +840,16 @@ public abstract class EmvApplet extends Applet {
             }
         }
 
-        short tag70Length = expandReadRecord(readRecord, tmpBuffer, (short) 0);
+        short dataLength;
+        if (readRecord.isRaw()) {
+            dataLength = readRecord.copyDataToArray(responseBuffer, (short) 0);
+        } else {
+            short tag70Length = expandReadRecord(readRecord, tmpBuffer, (short) 0);
 
-        EmvTag tag = EmvTag.setTag((short) 0x0070, tmpBuffer, (short) 0, (byte) tag70Length);
+            EmvTag tag = EmvTag.setTag((short) 0x0070, tmpBuffer, (short) 0, (byte) tag70Length);
 
-        short dataLength = tag.copyToArray(responseBuffer, (short) 0);
+            dataLength = tag.copyToArray(responseBuffer, (short) 0);
+        }
 
         checkExpectedLength(buf, dataLength);
 
@@ -782,19 +863,22 @@ public abstract class EmvApplet extends Applet {
         }
         pendingResponse = JCSystem.makeTransientShortArray((short) 2, JCSystem.CLEAR_ON_DESELECT);
         responseDeferred = JCSystem.makeTransientBooleanArray((short) 1, JCSystem.CLEAR_ON_DESELECT);
-        
+
+        dataStore = new DataStore();
+        DataStore.current = dataStore;
+
         factoryReset();
 
         responseTemplateGetProcessingOptions = new TagTemplate();
+        responseTemplateGetProcessingOptionsContactless = new TagTemplate();
         responseTemplateDda = new TagTemplate();
         responseTemplateGenerateAc = new TagTemplate();
         tag6fFci = new TagTemplate();
         tagA5Fci = new TagTemplate();
         tagBf0cFci = new TagTemplate();
 
-        //emvTags = EmvTag.setTag((short) 0x00, tmpBuffer, (short) 0, (byte) 0);
-
-        //readRecords = ReadRecord.setRecord((short) 0x00, tmpBuffer, (short) 0, (byte) 0);
+        // FCI: DF Name (84) and FCI Proprietary Template (A5), EMV Book 1, 11.3.4
+        tag6fFci.setData(DEFAULT_FCI_TEMPLATE, (short) 0, (byte) DEFAULT_FCI_TEMPLATE.length);
 
         randomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
     }

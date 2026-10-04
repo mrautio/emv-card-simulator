@@ -129,6 +129,9 @@ test {
 
     useJUnitPlatform()
 
+    // Private test cards are tested with testPrivateCards
+    exclude '**/PrivateCardTest*'
+
     testLogging {
         outputs.upToDateWhen { false }
         events "started", "passed", "skipped", "failed"
@@ -137,6 +140,28 @@ test {
     }
 
     failFast = false
+}
+
+task testPrivateCards(type: Test) {
+    dependsOn buildSimulatorLibrary
+    group "Verification"
+    description "Run transactions of the private test cards in private/cards against emvpt, -PprivateCards=<path part> selects cards"
+    workingDir 'src/test/java/emvcardsimulator'
+    systemProperty 'privateCards', project.findProperty('privateCards') ?: ''
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching 'emvcardsimulator.PrivateCardTest'
+    }
+
+    testLogging {
+        outputs.upToDateWhen { false }
+        events "passed", "skipped", "failed"
+        exceptionFormat "short"
+        showStandardStreams true
+    }
 }
 
 compileJava {

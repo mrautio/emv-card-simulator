@@ -95,6 +95,13 @@ public class SmartCard {
     }
 
     /**
+     * Change the transport protocol, e.g. from the contact to the contactless interface, the applets keep their data.
+     */
+    public static void changeProtocol(String protocol) {
+        cardSimulator.changeProtocol(protocol);
+    }
+
+    /**
      * True if the transport protocol is T=0.
      */
     public static boolean isProtocolT0() {
