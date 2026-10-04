@@ -1,0 +1,19 @@
+# Proximity Payment System Environment (EMV Contactless Book B, 3.3) for card_setup_app_apdus-spankki.yaml
+# Select PPSE AID 2PAY.SYS.DDF01
+- req: '00 A4 04 00 0E 32 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
+  res: '90 00'
+# "Factory reset"
+- req: '80 05 00 00 00'
+  res: '90 00'
+# Setup tag templates: FCI (6F) = DF Name (84) || FCI Proprietary Template (A5), A5 = FCI Issuer Discretionary Data (BF0C).
+- req: '80 02 00 04 04 00 84 00 A5'
+  res: '90 00'
+- req: '80 02 00 05 02 BF 0C'
+  res: '90 00'
+# Setup ICC EMV tags
+- req: '80 01 00 84 0E 32 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
+  res: '90 00'
+# Directory Entry: ADF Name (4F) A000000003101001, Application Label (50) "VISA DEBIT", Application Priority Indicator (87),
+# Kernel Identifier (9F2A) '03' Visa
+- req: '80 01 BF 0C 1F 61 1D 4F 08 A0 00 00 00 03 10 10 01 50 0A 56 49 53 41 20 44 45 42 49 54 87 01 01 9F 2A 01 03'
+  res: '90 00'
