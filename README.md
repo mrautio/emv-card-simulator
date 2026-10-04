@@ -38,6 +38,25 @@ Card setup APDU files in a git ignored `private/cards` directory are tested agai
 gradle testPrivateCards
 ```
 
+## Library
+
+`lib` packages the simulator applets with a host API (`emvcardsimulator.api`) for embedding the simulator to other
+applications.
+
+```sh
+gradle -p lib build
+```
+
+```java
+EmvCard card = new EmvCard(EmvCard.PROTOCOL_CONTACTLESS);
+card.personalize(ApduScript.bundled("card_setup_ppse_apdus.yaml"));
+card.personalize(ApduScript.bundled("card_setup_app_apdus.yaml"));
+byte[] response = card.transmit(commandApdu);
+```
+
+Applets are installed when a script selects them. The APDU scripts of `src/main/rust/config` are bundled, and the ones of
+`src/test/java/config` with a `test/` prefix, e.g. `test/card_setup_app_visa_contactless_apdus.yaml`.
+
 ## Update dependencies
 
 Run the [GitHub Actions Workflow](https://github.com/mrautio/emv-card-simulator/actions/workflows/update-dependencies.yml).

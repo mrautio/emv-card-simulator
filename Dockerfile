@@ -16,9 +16,11 @@ COPY build.gradle gradle.properties ./
 COPY config ./config
 COPY gradle ./gradle
 COPY src ./src
+COPY lib ./lib
 
 # build and test the application
 RUN gradle build \
+    && gradle -p lib build \
 # build multiple JavaCard applications for different versions
     && gradle -Pjc_version=3.0.5 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_5 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_5/ \
     && gradle -Pjc_version=3.0.4 --console=verbose clean cap --info && mkdir --parents /tmp/javacard_build/3_0_4 && mv /tmp/build/*.cap /tmp/javacard_build/3_0_4/ \
