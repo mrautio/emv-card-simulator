@@ -180,7 +180,7 @@ checksum = "3c877555693c14d2f84191cfd3ad8582790fc52b5e2274b40b59cf5f5cea25c7"
 [[package]]
 name = "emvpt"
 version = "0.1.0"
-source = "git+https://github.com/mrautio/emvpt#8c16beb40e23214253ea9e44587cb5f0bda7ff16"
+source = "git+https://github.com/mrautio/emvpt#33c9b9d1cd047e9b663aea138e2e36ace7a9635c"
 dependencies = [
  "asn1_der",
  "chrono",

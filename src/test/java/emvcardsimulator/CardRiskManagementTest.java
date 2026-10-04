@@ -184,6 +184,42 @@ public class CardRiskManagementTest {
         assertArrayEquals(hex("0F A5 01 A8 30 00 3A 00 00 00 00 00 00 00 00 00"), findTag(response.getData(), 0x9F10));
     }
 
+    /**
+     * First GENERATE AC with CDOL1 of the test profile in a country.
+     */
+    private static ResponseAPDU mastercardFirstGenerateAc(String referenceControlParameter, String terminalCountryCode) throws CardException {
+        ResponseAPDU response = send("80 AE " + referenceControlParameter + " 00 1D 000000000001 000000000000 " + terminalCountryCode
+            + " 0000000000 0978 200724 21 01234567 00");
+        assertSw(0x9000, response);
+        return response;
+    }
+
+    @Test
+    public void mastercardCardVerificationResultsTest() throws CardException, GeneralSecurityException {
+        // M/Chip IAD: Key Derivation Index '01', Cryptogram Version Number 14, CVR (6), DAC/ICC Dynamic Number (2), counters (8)
+        assertSw(0x9000, send("80 01 9F 10 12 01 14 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"));
+        assertSw(0x9000, send("80 00 00 0D 02 03 02"));
+        startTransaction();
+
+        assertSw(0x63C2, send("00 20 00 80 08 24 12 35 FF FF FF FF FF"));
+        assertSw(0x9000, send("00 20 00 80 08 24 12 34 FF FF FF FF FF"));
+
+        // Second GENERATE AC not requested, ARQC, offline PIN performed and successful. PIN Try Counter 3, offline PIN failed once,
+        // domestic transaction
+        ResponseAPDU response = mastercardFirstGenerateAc("80", "0246");
+        assertArrayEquals(hex("01 14 A5 00 03 12 00 00 00 00 00 00 00 00 00 00 00 00"), findTag(response.getData(), 0x9F10));
+
+        // TC in second GENERATE AC after successful issuer authentication
+        response = approveOnline(response);
+        assertEquals((byte) 0x40, cryptogramType(response));
+        assertArrayEquals(hex("01 14 65 10 03 12 00 00 00 00 00 00 00 00 00 00 00 00"), findTag(response.getData(), 0x9F10));
+
+        // CDA in the first GENERATE AC of an international transaction
+        startTransaction();
+        response = mastercardFirstGenerateAc("90", "0840");
+        assertArrayEquals(hex("01 14 A0 40 03 04 00 00 00 00 00 00 00 00 00 00 00 00"), findTag(response.getData(), 0x9F10));
+    }
+
     @Test
     public void consecutiveOfflineLimitsTest() throws CardException, GeneralSecurityException {
         assertSw(0x9000, send(CARD_RISK_MANAGEMENT_ENABLED));

@@ -136,8 +136,11 @@ impl ApduRequestResponse {
 
 // ICC Application Cryptogram Master Key MK_AC personalized in card_setup_app_apdus.yaml
 const AC_MASTER_KEY: &str = "0123456789ABCDEFFEDCBA9876543210";
-// Authorisation Response Code '00' = approved
+// Authorisation Response Codes of the issuer, approved in the settings.yaml of the tests: '00' approved and '05' do not honour (ISO 8583)
 const AUTHORISATION_RESPONSE_CODE: &[u8] = b"00";
+const AUTHORISATION_RESPONSE_CODE_DECLINED: &[u8] = b"05";
+// Unable to go online, offline approved (EMV Book 4, A6)
+const AUTHORISATION_RESPONSE_CODE_UNABLE_TO_GO_ONLINE: &[u8] = b"Y3";
 
 fn triple_des_encrypt(double_length_key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut key = double_length_key.to_vec();
@@ -193,15 +196,19 @@ fn retail_mac(double_length_key: &[u8], data: &[u8]) -> Vec<u8> {
 
 /// Issuer Authentication Data (tag 91) with ARPC Method 1 as the issuer would generate it.
 /// EMV Book 2, A1.3.1 session key derivation and 8.2.1 ARPC Method 1: ARPC || ARC
-fn issuer_authentication_data(arqc: &[u8], atc: &[u8]) -> Vec<u8> {
+fn issuer_authentication_data(
+    arqc: &[u8],
+    atc: &[u8],
+    authorisation_response_code: &[u8],
+) -> Vec<u8> {
     let session_key = application_cryptogram_session_key(atc);
 
     let mut y = arqc.to_vec();
-    y[0] ^= AUTHORISATION_RESPONSE_CODE[0];
-    y[1] ^= AUTHORISATION_RESPONSE_CODE[1];
+    y[0] ^= authorisation_response_code[0];
+    y[1] ^= authorisation_response_code[1];
 
     let mut result = triple_des_encrypt(&session_key, &y);
-    result.extend_from_slice(AUTHORISATION_RESPONSE_CODE);
+    result.extend_from_slice(authorisation_response_code);
     result
 }
 
@@ -213,15 +220,24 @@ fn data_object_list_data(connection: &EmvConnection, dol_tag: &str) -> Vec<u8> {
         .get_tag_list_tag_values(connection)
 }
 
+// Cryptogram Version Numbers and their offset in the Issuer Application Data
+const VISA_CRYPTOGRAM_VERSION_18: (u8, usize) = (0x12, 2);
+const MASTERCARD_CRYPTOGRAM_VERSION_14: (u8, usize) = (0x14, 1);
+
 /// Issuer verification of the Authorisation Request Cryptogram (9F26) the ICC generated with MK_AC
-/// over CDOL1 related data || AIP || ATC || Issuer Application Data, Cryptogram Version Number 18 of the IAD
-fn verify_authorisation_request_cryptogram(connection: &EmvConnection, cdol1_data: &[u8]) {
+/// over CDOL1 related data || AIP || ATC || Issuer Application Data
+fn verify_authorisation_request_cryptogram(
+    connection: &EmvConnection,
+    cdol1_data: &[u8],
+    cryptogram_version: (u8, usize),
+) {
     let aip = connection.get_tag_value("82").unwrap();
     let atc = connection.get_tag_value("9F36").unwrap();
     let issuer_application_data = connection.get_tag_value("9F10").unwrap();
+    let (version, offset) = cryptogram_version;
     assert_eq!(
-        issuer_application_data[2], 0x12,
-        "Cryptogram Version Number 18 in Issuer Application Data"
+        issuer_application_data[offset], version,
+        "Cryptogram Version Number in Issuer Application Data"
     );
 
     let mut data = cdol1_data.to_vec();
@@ -300,8 +316,14 @@ fn select_application(
     application
 }
 
-/// Contact transaction: DDA, enciphered offline PIN, online authorisation with issuer authentication in the second GENERATE AC
-fn contact_transaction(connection: &mut EmvConnection) {
+/// Contact transaction: DDA, enciphered offline PIN and online authorisation. The terminal completes the transaction with the
+/// second GENERATE AC requesting a TC or an AAC by the Authorisation Response Code (EMV Book 4, 6.3.8 and 12.2.1), the issuer
+/// response has Issuer Authentication Data for EXTERNAL AUTHENTICATE unless the terminal was unable to go online.
+fn contact_transaction_with(
+    connection: &mut EmvConnection,
+    authorisation_response_code: &[u8],
+    final_cryptogram_type: CryptogramType,
+) {
     setup_connection(connection).unwrap();
 
     // Setup the PSE ICC data
@@ -325,22 +347,67 @@ fn contact_transaction(connection: &mut EmvConnection) {
 
     connection.handle_terminal_action_analysis().unwrap();
 
-    if let CryptogramType::AuthorisationRequestCryptogram =
-        connection.handle_1st_generate_ac().unwrap()
-    {
+    assert!(matches!(
+        connection.handle_1st_generate_ac().unwrap(),
+        CryptogramType::AuthorisationRequestCryptogram
+    ));
+
+    connection.add_tag("8A", authorisation_response_code.to_vec());
+    if authorisation_response_code != AUTHORISATION_RESPONSE_CODE_UNABLE_TO_GO_ONLINE {
         // Online authorisation response from the issuer
         let arqc = connection.get_tag_value("9F26").unwrap().clone();
         let atc = connection.get_tag_value("9F36").unwrap().clone();
-        connection.add_tag("8A", AUTHORISATION_RESPONSE_CODE.to_vec());
-        connection.add_tag("91", issuer_authentication_data(&arqc, &atc));
+        connection.add_tag(
+            "91",
+            issuer_authentication_data(&arqc, &atc, authorisation_response_code),
+        );
 
         connection.handle_issuer_authentication_data().unwrap();
-        connection.handle_2nd_generate_ac().unwrap();
+        assert!(
+            !connection
+                .settings
+                .terminal
+                .tvr
+                .issuer_authentication_failed
+        );
     }
+
+    let cryptogram_type = connection.handle_2nd_generate_ac().unwrap();
+    assert_eq!(
+        cryptogram_type as u8, final_cryptogram_type as u8,
+        "Cryptogram type of the second GENERATE AC"
+    );
 
     // Consume logs that the card gathered
     execute_setup_apdus(connection, &["../config/card_log_consume_apdus.yaml"]);
     assert!(consume_logs(connection) > 0, "Card log entries");
+}
+
+/// Contact transaction approved online
+fn contact_transaction(connection: &mut EmvConnection) {
+    contact_transaction_with(
+        connection,
+        AUTHORISATION_RESPONSE_CODE,
+        CryptogramType::TransactionCertificate,
+    );
+}
+
+/// Contact transaction declined online, the terminal requests an AAC in the second GENERATE AC
+fn contact_declined_transaction(connection: &mut EmvConnection) {
+    contact_transaction_with(
+        connection,
+        AUTHORISATION_RESPONSE_CODE_DECLINED,
+        CryptogramType::ApplicationAuthenticationCryptogram,
+    );
+}
+
+/// Contact transaction where the terminal is unable to go online and approves offline, the card approves with a TC
+fn contact_unable_to_go_online_transaction(connection: &mut EmvConnection) {
+    contact_transaction_with(
+        connection,
+        AUTHORISATION_RESPONSE_CODE_UNABLE_TO_GO_ONLINE,
+        CryptogramType::TransactionCertificate,
+    );
 }
 
 // Default maximum number of the card log entries
@@ -367,25 +434,25 @@ fn consume_logs(connection: &mut EmvConnection) -> usize {
 // Device Estimated Transmission Time For Relay Resistance R-APDU
 const RELAY_RESISTANCE_TIMING: &[u8] = b"\x00\x00\x00\xC8\x00\x12";
 
-/// Mastercard contactless transaction (EMV Contactless Book C-2, Kernel 2): Relay Resistance Protocol, enciphered offline PIN,
-/// CDA with the relay resistance data in the ICC Dynamic Data and online authorisation of the ARQC
-fn mastercard_contactless_transaction(connection: &mut EmvConnection) {
+/// Mastercard contactless transaction (EMV Contactless Book C-2, Kernel 2): Relay Resistance Protocol, cardholder verification,
+/// CDA with the relay resistance data in the ICC Dynamic Data and online authorisation of the ARQC.
+/// The card is personalized with the PPSE setup file and the setup files applied after card_setup_app_apdus.yaml, the transaction
+/// is checked against the expected CVM Results and Mastercard CVR of the ARQC.
+fn mastercard_contactless_transaction_with(
+    connection: &mut EmvConnection,
+    ppse_setup_file: &str,
+    app_setup_files: &[&str],
+    cvm_results: &[u8],
+    cvr: &[u8],
+) {
     setup_connection(connection).unwrap();
     connection.contactless = true;
 
-    execute_setup_apdus(
-        connection,
-        &["../config/card_setup_ppse_mastercard_apdus.yaml"],
-    );
+    execute_setup_apdus(connection, &[ppse_setup_file]);
 
-    let application = select_application(
-        connection,
-        Some(0x02),
-        &[
-            "../config/card_setup_app_apdus.yaml",
-            "../config/card_setup_app_mastercard_contactless_apdus.yaml",
-        ],
-    );
+    let mut setup_files = vec!["../config/card_setup_app_apdus.yaml"];
+    setup_files.extend_from_slice(app_setup_files);
+    let application = select_application(connection, Some(0x02), &setup_files);
 
     SENT_COMMANDS.lock().unwrap().clear();
     connection.start_transaction(&application).unwrap();
@@ -420,10 +487,10 @@ fn mastercard_contactless_transaction(connection: &mut EmvConnection) {
     );
 
     connection.handle_card_verification_methods().unwrap();
-    // CVM Results: enciphered PIN verified by ICC was successful
     assert_eq!(
         connection.get_tag_value("9F34").unwrap(),
-        &vec![0x44, 0x03, 0x02]
+        &cvm_results.to_vec(),
+        "CVM Results"
     );
 
     connection.handle_terminal_risk_management().unwrap();
@@ -455,9 +522,32 @@ fn mastercard_contactless_transaction(connection: &mut EmvConnection) {
         "Relay resistance data in the ICC Dynamic Data"
     );
 
+    assert_eq!(
+        &connection.get_tag_value("9F10").unwrap()[2..8],
+        cvr,
+        "Mastercard CVR"
+    );
+
     // Online authorisation, no second GENERATE AC in a contactless transaction
     let cdol1_data = data_object_list_data(connection, "8C");
-    verify_authorisation_request_cryptogram(connection, &cdol1_data);
+    verify_authorisation_request_cryptogram(
+        connection,
+        &cdol1_data,
+        MASTERCARD_CRYPTOGRAM_VERSION_14,
+    );
+}
+
+/// Mastercard contactless transaction without CVM: Kernel 2 does not support offline PIN and the terminal does not support online PIN
+fn mastercard_contactless_transaction(connection: &mut EmvConnection) {
+    mastercard_contactless_transaction_with(
+        connection,
+        "../config/card_setup_ppse_mastercard_apdus.yaml",
+        &["../config/card_setup_app_mastercard_contactless_apdus.yaml"],
+        // CVM Results: No CVM required was successful
+        &[0x1F, 0x03, 0x02],
+        // CVR: second GENERATE AC not requested, ARQC, CDA in the first GENERATE AC, PIN Try Counter 3, domestic transaction
+        &[0xA0, 0x40, 0x03, 0x02, 0x00, 0x00],
+    );
 }
 
 // ICC private key of card_setup_app_apdus.yaml, the ICC PIN Encipherment key as the profile has no separate one
@@ -481,10 +571,34 @@ fn decipher_pin(verify_command: &[u8]) -> String {
     hex::encode(&pin_block[1..])[..pin_length].to_string()
 }
 
-/// Fake Mastercard contactless card for a demonstration: the card asks for the enciphered offline PIN and as it holds
-/// the ICC private key, it deciphers the PIN the cardholder entered on the terminal
-fn fake_mastercard_contactless_pin_transaction(connection: &mut EmvConnection) {
-    mastercard_contactless_transaction(connection);
+/// Mockstercard, a fake card scheme on top of Kernel 2, contactless card for a demonstration: the card asks for the
+/// enciphered offline PIN and as it holds the ICC private key, it deciphers the PIN the cardholder entered on the terminal
+fn mockstercard_contactless_pin_transaction(connection: &mut EmvConnection) {
+    // A Kernel 2 reader does not do offline PIN, the demonstration needs a terminal that deviates from EMV Contactless Book C-2
+    connection
+        .settings
+        .terminal
+        .protocol_deviations
+        .kernel_2_offline_pin = true;
+
+    mastercard_contactless_transaction_with(
+        connection,
+        "../config/card_setup_ppse_mockstercard_apdus.yaml",
+        &[
+            "../config/card_setup_app_mastercard_contactless_apdus.yaml",
+            "../config/card_setup_app_mockstercard_contactless_apdus.yaml",
+        ],
+        // CVM Results: enciphered PIN verified by ICC was successful
+        &[0x44, 0x03, 0x02],
+        // CVR: offline enciphered PIN verification performed and successful in addition to the CVR without CVM
+        &[0xA7, 0x40, 0x03, 0x02, 0x00, 0x00],
+    );
+
+    assert_eq!(
+        connection.get_tag_value("50").unwrap(),
+        &b"MOCKSTERCARD".to_vec(),
+        "Application Label"
+    );
 
     let commands = SENT_COMMANDS.lock().unwrap().clone();
     let verify_command = commands
@@ -494,7 +608,7 @@ fn fake_mastercard_contactless_pin_transaction(connection: &mut EmvConnection) {
 
     let pin = decipher_pin(verify_command);
     info!(
-        "***** Fake card deciphered the cardholder PIN: {} *****",
+        "***** Mockstercard deciphered the cardholder PIN: {} *****",
         pin
     );
     assert_eq!(pin, pin_entry().unwrap());
@@ -562,7 +676,7 @@ fn visa_contactless_transaction(connection: &mut EmvConnection) {
         CryptogramType::AuthorisationRequestCryptogram
     ));
 
-    verify_authorisation_request_cryptogram(connection, &cdol1_data);
+    verify_authorisation_request_cryptogram(connection, &cdol1_data, VISA_CRYPTOGRAM_VERSION_18);
 }
 
 /// Run a transaction against the simulated card of the Java callback, a failure is thrown as an AssertionError
@@ -626,6 +740,34 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_entryPoint(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_emvcardsimulator_SimulatorTest_contactDeclinedEntryPoint(
+    env: JNIEnv<'static>,
+    _class: JClass<'static>,
+    callback: JObject<'static>,
+) {
+    run_transaction(
+        env,
+        callback,
+        "Contact transaction declined online",
+        contact_declined_transaction,
+    );
+}
+
+#[no_mangle]
+pub extern "system" fn Java_emvcardsimulator_SimulatorTest_contactUnableToGoOnlineEntryPoint(
+    env: JNIEnv<'static>,
+    _class: JClass<'static>,
+    callback: JObject<'static>,
+) {
+    run_transaction(
+        env,
+        callback,
+        "Contact transaction unable to go online",
+        contact_unable_to_go_online_transaction,
+    );
+}
+
+#[no_mangle]
 pub extern "system" fn Java_emvcardsimulator_SimulatorTest_mastercardContactlessEntryPoint(
     env: JNIEnv<'static>,
     _class: JClass<'static>,
@@ -640,7 +782,7 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_mastercardContactless
 }
 
 #[no_mangle]
-pub extern "system" fn Java_emvcardsimulator_SimulatorTest_fakeMastercardContactlessPinEntryPoint(
+pub extern "system" fn Java_emvcardsimulator_SimulatorTest_mockstercardContactlessPinEntryPoint(
     env: JNIEnv<'static>,
     _class: JClass<'static>,
     callback: JObject<'static>,
@@ -648,8 +790,8 @@ pub extern "system" fn Java_emvcardsimulator_SimulatorTest_fakeMastercardContact
     run_transaction(
         env,
         callback,
-        "Fake Mastercard contactless transaction with enciphered PIN",
-        fake_mastercard_contactless_pin_transaction,
+        "Mockstercard (fake card scheme) contactless transaction with enciphered PIN",
+        mockstercard_contactless_pin_transaction,
     );
 }
 

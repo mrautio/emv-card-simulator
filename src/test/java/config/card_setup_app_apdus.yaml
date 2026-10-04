@@ -45,7 +45,8 @@
 # Card risk management uses Lower/Upper Consecutive Offline Limit tags 9F14/9F23, Offline Accumulator Balance 9F50 and
 # cumulative offline amount limits: '80 00 00 0E 0C' || lower (6) || upper (6), n12 like 9F02, zero is no limit.
 # Card Verification Results in Issuer Application Data 9F10: '80 00 00 0D 02' || format || offset,
-# format '01' Common Core Definitions CVR (5 bytes), '02' Visa CVR ('03' + 3 bytes), e.g. '80 00 00 0D 02 02 03' for this profile.
+# format '01' Common Core Definitions CVR (5 bytes), '02' Visa CVR ('03' + 3 bytes), e.g. '80 00 00 0D 02 02 03' for this profile,
+# '03' Mastercard M/Chip CVR (6 bytes), e.g. '80 00 00 0D 02 03 02' in card_setup_app_mastercard_contactless_apdus.yaml.
 # ICC PIN Encipherment key for enciphered offline PIN: modulus '80 00 00 0F', private exponent '80 00 00 10', empty modulus clears it.
 # Mag-stripe mode COMPUTE CRYPTOGRAPHIC CHECKSUM: KD_CVC3 '80 00 00 0B 10' || key, IVCVC3 Track1 (2) || Track2 (2) '80 00 00 0C 04',
 # UDOL tag 9F69 (default '9F 6A 04'), response template id 7 (default 9F61 9F60 9F36).
@@ -100,7 +101,9 @@
   res: '90 00'
 - req: '80 01 00 82 02 3C 00'
   res: '90 00'
-- req: '80 01 00 94 0C 08 02 02 00 10 01 03 00 18 01 02 01'
+# Application File Locator: SFI 1 record 2, SFI 2 records 1-3 and SFI 3 records 1-2. Both SFI 3 records are static data to be
+# authenticated, so the CDOL1, CDOL2, CVM List, Issuer Action Codes, Application Currency Code and Application Version Number are signed.
+- req: '80 01 00 94 0C 08 02 02 00 10 01 03 00 18 01 02 02'
   res: '90 00'
 # Track2
 - req: '80 01 00 57 0F 12 34 56 00 12 34 56 08 D2 91 22 20 09 99 9F'
@@ -109,7 +112,9 @@
   res: '90 00'
 - req: '80 01 9F 1F 18 31 32 32 39 34 30 30 30 30 30 32 30 30 30 30 32 34 39 30 30 30 30 30 30'
   res: '90 00'
-- req: '80 01 9F 46 F8 83 29 0E ED 5A 25 E8 94 50 04 ED FF 7D 9E 39 94 9E D6 65 A3 1C A1 CE 01 AF 88 75 9A 61 45 60 4A 02 4F 09 8A 5E CD 5B ED 27 5A 5A F9 0E 53 9B 01 FD 22 6F 54 37 EF D7 E2 2D E3 91 AA BA F2 56 E1 88 1B 3F 47 C0 5A D2 C3 C0 F9 83 2C D2 27 26 CA 6D FA 80 56 A4 74 7B 60 32 1C 03 7E AD C9 FF 0A 18 EB F0 02 75 21 C5 46 22 FD C7 2B 9C B7 F6 03 B4 44 4D 4E 8C DF 55 78 AB 01 D0 61 24 3C 25 04 0E AA 97 7F 66 08 35 AC 26 26 C9 B1 80 82 99 5F 8A FC 70 AC AE 52 5E E5 22 81 85 0E 60 8D DF DC 85 21 F2 82 42 89 57 23 7A EE DC 88 DC 32 34 AF 4D 79 5E 89 43 D6 3C BA 90 C0 FE 90 57 91 AE C7 BD CA 7A 6E 76 40 D0 D3 5D FF F7 AE 77 35 5B 17 7B CC 4F 7A 70 8A BF C1 A6 A3 9C 73 E3 F4 80 20 64 FF 05 9B EC 05 DC 40 60 90 95 CD 89 8A B4 B2 19 E9 C6 F9 90 27 DA B2'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated is
+# SFI 3 records 1-2 and the Application Interchange Profile (Static Data Authentication Tag List 9F4A)
+- req: '80 01 9F 46 F8 36 31 EC F2 92 69 69 5F A7 53 1C 7F 1A 85 CB 2E 73 CF 5E 0D BF D7 64 D2 01 8D 4C AA E5 AC CF 8F DC 31 77 57 D1 28 03 27 BC C9 09 D8 5D 62 B4 DA AB D0 4C E2 70 CA 85 14 90 2F 90 69 4A E6 73 B4 E0 3F 1C E3 54 AB B9 11 DD 16 1A E5 59 B4 3F 4F 56 4A 34 94 FC 1B F2 93 CB B2 B9 BC BF C2 02 18 B8 3A 04 03 9E F0 BF 8A 3B 03 28 45 9E 37 D6 F9 31 84 91 21 01 9B 38 81 C9 61 21 DC 72 17 24 C3 49 D1 BB 04 A1 B2 5A 91 DD AA 81 53 80 22 B3 CD 79 B5 5D 75 23 47 74 AF FF 57 56 11 C4 8B 9E B8 24 7C 9B EC 1F 2D 07 5B 32 27 0B B9 F9 0A B7 C3 93 63 8D 9D FD F1 BF 46 41 E7 3E F2 50 4A D9 9D E5 AD 74 21 40 1B 20 47 70 9F 46 89 CA B1 25 BE 52 C0 A2 C6 14 86 DD A8 3E A1 1A F9 42 4D 5D 93 AD 10 71 2F 12 F7 EA 4C 77 CA 0F 11 E0 7B CE 57 35 27 05 06 49 C8 28 96'
   res: '90 00'
 - req: '80 01 9F 47 01 03'
   res: '90 00'

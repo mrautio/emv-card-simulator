@@ -45,7 +45,9 @@ public class PaymentApplication extends EmvApplet {
     // Card risk management state and script command count of previous transactions, at the start of the transaction
     private static final short OFFSET_PREVIOUS_RISK_STATE = (short) 8;
     private static final short OFFSET_PREVIOUS_SCRIPT_COMMAND_COUNT = (short) 9;
-    private static final short TRANSACTION_STATE_LENGTH = (short) 10;
+    // Card verification events of the transaction for the Mastercard CVR
+    private static final short OFFSET_VERIFICATION_EVENTS = (short) 10;
+    private static final short TRANSACTION_STATE_LENGTH = (short) 11;
 
     private static final byte TXN_OFFLINE_PIN_PERFORMED = (byte) 0x01;
     private static final byte TXN_OFFLINE_PIN_FAILED = (byte) 0x02;
@@ -55,6 +57,11 @@ public class PaymentApplication extends EmvApplet {
     private static final byte TXN_UNABLE_TO_GO_ONLINE = (byte) 0x20;
     private static final byte TXN_SCRIPT_RECEIVED = (byte) 0x40;
     private static final byte TXN_LOGGED = (byte) 0x80;
+
+    private static final byte VERIFICATION_ENCIPHERED_PIN = (byte) 0x01;
+    private static final byte VERIFICATION_OFFLINE_PIN_SUCCESSFUL = (byte) 0x02;
+    private static final byte VERIFICATION_CDA_FIRST_GENERATE_AC = (byte) 0x04;
+    private static final byte VERIFICATION_CDA_SECOND_GENERATE_AC = (byte) 0x08;
 
     // Same bit positions as in Common Core Definitions CVR byte 3
     private static final byte CRM_LOWER_COUNT_EXCEEDED = (byte) 0x80;
@@ -76,6 +83,8 @@ public class PaymentApplication extends EmvApplet {
     private static final byte CVR_FORMAT_CCD = (byte) 0x01;
     // Visa CVR, length byte '03' followed by 3 bytes
     private static final byte CVR_FORMAT_VISA = (byte) 0x02;
+    // Mastercard M/Chip CVR, 6 bytes (M/Chip 4 Issuer Guide to Debit and Credit Parameter Management, A.19)
+    private static final byte CVR_FORMAT_MASTERCARD = (byte) 0x03;
 
     // Authorisation Response Codes 'Y3' and 'Z3': unable to go online, offline approved or declined
     private static final short ARC_UNABLE_TO_GO_ONLINE_APPROVED = (short) 0x5933;
@@ -272,7 +281,7 @@ public class PaymentApplication extends EmvApplet {
                     ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
                 }
                 if (buf[ISO7816.OFFSET_CDATA] != CVR_FORMAT_NONE && buf[ISO7816.OFFSET_CDATA] != CVR_FORMAT_CCD
-                    && buf[ISO7816.OFFSET_CDATA] != CVR_FORMAT_VISA) {
+                    && buf[ISO7816.OFFSET_CDATA] != CVR_FORMAT_VISA && buf[ISO7816.OFFSET_CDATA] != CVR_FORMAT_MASTERCARD) {
                     ISOException.throwIt(ISO7816.SW_DATA_INVALID);
                 }
                 cvrFormat = buf[ISO7816.OFFSET_CDATA];
@@ -626,6 +635,18 @@ public class PaymentApplication extends EmvApplet {
         return (transactionState[OFFSET_TRANSACTION_EVENTS] & event) != 0;
     }
 
+    private void setVerificationEvent(byte event, boolean value) {
+        if (value) {
+            transactionState[OFFSET_VERIFICATION_EVENTS] |= event;
+        } else {
+            transactionState[OFFSET_VERIFICATION_EVENTS] &= (byte) ~event;
+        }
+    }
+
+    private boolean isVerificationEvent(byte event) {
+        return (transactionState[OFFSET_VERIFICATION_EVENTS] & event) != 0;
+    }
+
     private void setRiskState(byte flag, boolean value) {
         if (value) {
             riskState |= flag;
@@ -852,19 +873,38 @@ public class PaymentApplication extends EmvApplet {
         }
     }
 
+    private short cardVerificationResultsLength() {
+        switch (cvrFormat) {
+            case CVR_FORMAT_CCD:
+                return (short) 5;
+            case CVR_FORMAT_MASTERCARD:
+                return (short) 6;
+            default:
+                return (short) 4;
+        }
+    }
+
+    /**
+     * Issuer Application Data (tag 9F10) when it has room for the Card Verification Results at the configured offset, otherwise null.
+     */
+    private EmvTag findCardVerificationResults() {
+        EmvTag issuerApplicationData = EmvTag.findTag((short) 0x9F10);
+        if (cvrFormat == CVR_FORMAT_NONE || issuerApplicationData == null
+            || (short) (cvrOffset + cardVerificationResultsLength()) > (short) (issuerApplicationData.getLength() & 0x00FF)) {
+            return null;
+        }
+        return issuerApplicationData;
+    }
+
     /**
      * Update Card Verification Results in Issuer Application Data (tag 9F10) at the configured offset.
      */
     private void updateCardVerificationResults() {
-        if (cvrFormat == CVR_FORMAT_NONE) {
+        EmvTag issuerApplicationData = findCardVerificationResults();
+        if (issuerApplicationData == null) {
             return;
         }
-
-        EmvTag issuerApplicationData = EmvTag.findTag((short) 0x9F10);
-        short cvrLength = cvrFormat == CVR_FORMAT_CCD ? (short) 5 : (short) 4;
-        if (issuerApplicationData == null || (short) (cvrOffset + cvrLength) > (short) (issuerApplicationData.getLength() & 0x00FF)) {
-            return;
-        }
+        short cvrLength = cardVerificationResultsLength();
 
         byte firstType = cvrCryptogramType(transactionState[OFFSET_FIRST_CRYPTOGRAM_TYPE]);
         byte secondType = transactionState[OFFSET_STATE] == STATE_ARQC_ISSUED
@@ -901,6 +941,8 @@ public class PaymentApplication extends EmvApplet {
             cvr[3] |= isPreviousRiskState((byte) (RISK_SDA_FAILED | RISK_DDA_FAILED)) ? (byte) 0x04 : 0;
             cvr[3] |= isPreviousRiskState(RISK_GO_ONLINE_NEXT) ? (byte) 0x02 : 0;
             cvr[3] |= isTransactionEvent(TXN_UNABLE_TO_GO_ONLINE) ? (byte) 0x01 : 0;
+        } else if (cvrFormat == CVR_FORMAT_MASTERCARD) {
+            updateMastercardCardVerificationResults(cvr, firstType, secondType, pinTryCounter, riskEvents);
         } else {
             cvr[0] = (byte) 0x03;
 
@@ -927,6 +969,43 @@ public class PaymentApplication extends EmvApplet {
         }
 
         Util.arrayCopyNonAtomic(cvr, (short) 0, issuerApplicationData.getData(), cvrOffset, cvrLength);
+    }
+
+    /**
+     * Mastercard M/Chip CVR (M/Chip 4 Issuer Guide to Debit and Credit Parameter Management, A.19) with the indicators of the events
+     * of this transaction. Domestic and international transaction as in EMV Book 3, 10.4.2: Issuer Country Code (5F28) compared to
+     * Terminal Country Code (9F1A) of the transaction. Script Counter, the indicators of previous transactions and the
+     * Additional Check Table are not supported and left zero.
+     */
+    private void updateMastercardCardVerificationResults(byte[] cvr, byte firstType, byte secondType, byte pinTryCounter, byte riskEvents) {
+        final boolean offlinePinPerformed = isTransactionEvent(TXN_OFFLINE_PIN_PERFORMED);
+
+        cvr[0] = (byte) ((secondType << 6) | (firstType << 4));
+        cvr[0] |= offlinePinPerformed ? (byte) 0x04 : 0;
+        cvr[0] |= isVerificationEvent(VERIFICATION_ENCIPHERED_PIN) ? (byte) 0x02 : 0;
+        cvr[0] |= offlinePinPerformed && isVerificationEvent(VERIFICATION_OFFLINE_PIN_SUCCESSFUL) ? (byte) 0x01 : 0;
+
+        cvr[1] = isTransactionEvent(TXN_DDA_PERFORMED) ? (byte) 0x80 : 0;
+        cvr[1] |= isVerificationEvent(VERIFICATION_CDA_FIRST_GENERATE_AC) ? (byte) 0x40 : 0;
+        cvr[1] |= isVerificationEvent(VERIFICATION_CDA_SECOND_GENERATE_AC) ? (byte) 0x20 : 0;
+        cvr[1] |= isTransactionEvent(TXN_ISSUER_AUTHENTICATION_PERFORMED) ? (byte) 0x10 : 0;
+
+        // Right nibble of the PIN Try Counter
+        cvr[2] = (byte) (pinTryCounter & 0x0F);
+
+        cvr[3] = isTransactionEvent(TXN_UNABLE_TO_GO_ONLINE) ? (byte) 0x40 : 0;
+        cvr[3] |= isTransactionEvent(TXN_OFFLINE_PIN_FAILED) ? (byte) 0x10 : 0;
+        cvr[3] |= pinTryCounter == (byte) 0 ? (byte) 0x08 : 0;
+
+        EmvTag issuerCountryCode = EmvTag.findTag((short) 0x5F28);
+        if (issuerCountryCode != null && issuerCountryCode.getLength() == (byte) 2 && findTransactionData((short) 0x9F1A)
+            && dataObjectListEntryLength == (short) 2) {
+            cvr[3] |= Util.arrayCompare(foundTransactionData, foundTransactionDataOffset, issuerCountryCode.getData(), (short) 0, (short) 2) == 0
+                ? (byte) 0x02 : (byte) 0x04;
+        }
+
+        // Lower and upper consecutive and cumulative offline limits exceeded
+        cvr[4] = (byte) (riskEvents & (byte) 0xF0);
     }
 
     /**
@@ -1048,6 +1127,7 @@ public class PaymentApplication extends EmvApplet {
         final boolean cdaPerformed = cdaRequested && responseCryptogramType != CID_AAC;
         if (cdaPerformed) {
             setTransactionEvent(TXN_CDA_PERFORMED);
+            setVerificationEvent(secondGenerateAc ? VERIFICATION_CDA_SECOND_GENERATE_AC : VERIFICATION_CDA_FIRST_GENERATE_AC, true);
         }
         transactionState[secondGenerateAc ? OFFSET_SECOND_CRYPTOGRAM_TYPE : OFFSET_FIRST_CRYPTOGRAM_TYPE] = responseCryptogramType;
         updateCardVerificationResults();
@@ -1767,6 +1847,8 @@ public class PaymentApplication extends EmvApplet {
         }
 
         setTransactionEvent(TXN_OFFLINE_PIN_PERFORMED);
+        setVerificationEvent(VERIFICATION_ENCIPHERED_PIN, pinTypeQualifier == (byte) 0x88);
+        setVerificationEvent(VERIFICATION_OFFLINE_PIN_SUCCESSFUL, false);
 
         byte[] givenPinBlock = buf;
         short givenPinBlockOffset = (short) ISO7816.OFFSET_CDATA;
@@ -1826,6 +1908,7 @@ public class PaymentApplication extends EmvApplet {
         }
 
         setPinTryCounter(PIN_TRY_LIMIT);
+        setVerificationEvent(VERIFICATION_OFFLINE_PIN_SUCCESSFUL, true);
 
         EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
     }

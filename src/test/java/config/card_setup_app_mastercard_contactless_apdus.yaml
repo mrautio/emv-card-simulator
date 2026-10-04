@@ -1,4 +1,4 @@
-# Mastercard contactless (EMV Contactless Book C-2, Kernel 2) profile: CDA, Relay Resistance Protocol and enciphered offline PIN.
+# Mastercard contactless (EMV Contactless Book C-2, Kernel 2) profile: M/Chip with CDA, Relay Resistance Protocol and no CVM.
 # Applied after card_setup_app_apdus.yaml, only the differing data objects are set here.
 - req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
   res: '90 00'
@@ -12,11 +12,29 @@
 # EMV mode and Relay Resistance Protocol supported (byte 2, EMV Contactless Book C-2, A.1.16)
 - req: '80 01 00 82 02 19 81'
   res: '90 00'
-# CVM List: enciphered PIN verified by ICC if the terminal supports it (apply succeeding CVM Rule if unsuccessful),
-# otherwise No CVM required
-- req: '80 01 00 8E 0C 00 00 00 00 00 00 00 00 44 03 1F 03'
+# CVM List: enciphered PIN verified online if the terminal supports it, otherwise No CVM required. Kernel 2 has no offline PIN
+# (no VERIFY command in EMV Contactless Book C-2), and Mastercard has removed the signature CVM.
+- req: '80 01 00 8E 0C 00 00 00 00 00 00 00 00 42 03 1F 03'
   res: '90 00'
-# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated
-# includes the Application Interchange Profile (Static Data Authentication Tag List 9F4A) and the CVM List
-- req: '80 01 9F 46 F8 4B B7 CD 4F 02 96 65 AD 24 68 2C 14 7F 4B CF EB 21 23 E7 6A 62 27 2A 19 B8 90 BF 48 3B 2D C5 1B 83 41 A8 BB 79 61 EC 71 8D BF B3 40 59 89 E5 20 09 68 1B 32 72 20 5C F8 8D B3 10 B5 3C C2 EB E8 D9 89 0A 40 D8 D1 AA 59 E3 C0 E0 23 B9 2B 95 3D 08 ED 51 A8 F5 07 99 B3 7C F9 4E BF 0A FA F3 91 87 02 37 52 7E 98 65 B8 51 2F DA 17 E4 27 6F 58 B1 DF C7 A4 BD 14 31 39 5B 3B CF 74 D6 0D 88 A6 5D 6B 4F 02 89 98 6A 7E C5 20 D9 B5 E3 CA 9E 29 14 F8 DE 57 D8 C3 33 51 22 F3 9C EF 39 97 6B CA 6E D0 DE 3A 44 29 37 6A 91 46 BD 81 50 33 CE 3A 3D 7D E6 85 14 A2 5A B4 E1 F9 95 55 D1 32 2D 85 2A 52 84 51 5B AD 1F A6 7E 1D C6 7B 3C D9 3B D4 B3 D1 A0 02 DB C2 09 65 FC 48 EB 29 3D CA 5A 2F 46 2F A0 D7 FE BD 3B 25 1A 0A 5B 10 02 67 A8 A3 06 E9 89 F8 A8 57 1F 15'
+# Issuer Application Data of M/Chip: Key Derivation Index '01', Cryptogram Version Number 14 (EMV Common Session Key derivation),
+# CVR (6), DAC/ICC Dynamic Number (2) and counters (8). Mastercard CVR at offset 2, the card updates it. The Application Cryptogram is
+# generated over the data of the base profile (CDOL1 related data || AIP || ATC || IAD), not over the M/Chip CVN 14 data.
+- req: '80 01 9F 10 12 01 14 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
+  res: '90 00'
+- req: '80 00 00 0D 02 03 02'
+  res: '90 00'
+# Application Version Number of M/Chip
+- req: '80 01 9F 08 02 00 02'
+  res: '90 00'
+# Application Label in FCI, no Application Preferred Name
+- req: '80 01 00 50 0A 4D 41 53 54 45 52 43 41 52 44'
+  res: '90 00'
+- req: '80 02 00 05 06 00 50 00 87 5F 2D'
+  res: '90 00'
+# Cardholder name and Track 1 Discretionary Data are not available on the contactless interface, SFI 1 record 2 has only the Track 2
+- req: '80 03 02 0C 02 00 57'
+  res: '90 00'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated is
+# SFI 3 records 1-2 and the Application Interchange Profile (Static Data Authentication Tag List 9F4A)
+- req: '80 01 9F 46 F8 57 DD 65 67 E9 0E 5E 58 AF A4 62 C5 4A F6 0B 56 8D 7F D7 51 41 C8 E1 AA FD C1 19 70 22 E2 95 20 A3 3C 83 44 43 7E 4D BE 0D 81 92 20 C1 32 9A 8B AA C7 26 6A 6C 25 23 0C FF B4 72 01 4F 0E B4 95 FB 35 47 E2 4A B5 1C B0 16 80 0B 8C 15 58 8F 12 0D 5E 55 0D 4D 7B C9 62 4C 89 0C 78 86 87 0D 57 48 D5 79 B6 70 56 75 9B 8C D6 92 C4 7F AB BC D8 5C 39 39 4D E6 D3 EC BA 41 6B 86 F4 0D DF 30 65 94 B5 8F B6 A8 4D 71 B5 10 83 93 16 CC 08 1C A5 36 5A 25 87 7F AF C5 16 51 31 6F F8 94 77 7C 2D 23 58 5E 50 70 64 38 8D 97 0A 02 81 3B FE A8 BC 27 B7 98 F5 B3 9C 66 27 D8 B4 08 1A 4C 01 4B 6F 94 64 05 F9 77 81 6A 71 59 9B 35 8D 42 86 76 35 1F 41 4A 7D 9F AA 12 CF 57 BC 8F F8 99 84 4E BD 45 94 4D 71 B6 37 E4 4E 7F 16 CA CD D1 60 BC 32 42 31 90 71 D0 0F 96 0D'
   res: '90 00'

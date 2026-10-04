@@ -19,13 +19,20 @@
 # Application Interchange Profile: DDA (fDDA) supported, no cardholder verification in the CVM List
 - req: '80 01 00 82 02 20 00'
   res: '90 00'
+# Application File Locator: Track 2 Equivalent Data is in the GET PROCESSING OPTIONS response, SFI 1 is not read.
+# Static data to be authenticated is SFI 3 records 1-2.
+- req: '80 01 00 94 08 10 01 03 00 18 01 02 02'
+  res: '90 00'
+# Cardholder name and Track 1 Discretionary Data are not available on the contactless interface, SFI 1 record 2 has only the Track 2
+- req: '80 03 02 0C 02 00 57'
+  res: '90 00'
 # PDOL: Terminal Transaction Qualifiers followed by the CDOL1 data objects
 - req: '80 01 9F 38 18 9F 66 04 9F 02 06 9F 03 06 9F 1A 02 95 05 5F 2A 02 9A 03 9C 01 9F 37 04'
   res: '90 00'
 # Card Transaction Qualifiers: no online PIN or signature required, CVM is not required
 - req: '80 01 9F 6C 02 00 00'
   res: '90 00'
-# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated
-# includes the Application Interchange Profile (Static Data Authentication Tag List 9F4A) and the CVM List
-- req: '80 01 9F 46 F8 42 03 FA 99 01 85 6B EA 5F 33 AB 95 3A 3C 0C 14 21 51 34 79 5D B1 C0 EF 7C FA C1 02 98 DE BA 73 FA 4F A5 F6 AA 86 12 C1 B4 1D FF FE E2 1F B1 47 AD 3E 2E 5A DA C7 3F 78 25 57 58 23 DC FF 36 B3 F5 D5 99 CE BC 38 54 9D 30 6E B6 EF 25 3B 7A 58 3F 76 AC FC 24 55 EC E8 04 B9 10 D7 A3 D8 12 35 1F 48 B5 83 D9 1C F6 10 16 92 01 86 2D 22 42 E3 B1 FA 02 F0 F6 FE D8 55 F5 51 D7 E4 2F 91 8B 00 76 16 21 F7 71 F9 A5 7C D7 A4 61 86 96 A6 37 46 F4 D1 29 A1 EA 37 19 61 74 0B 1D 08 EB 1C A5 F4 52 36 23 1F 2D 7D 3D 82 DE 1F 57 E2 7A E4 03 C6 55 81 EB 36 2E 29 DD C4 4E 5A A0 E4 66 89 CB E1 58 10 C9 AE DE 35 9D F5 8E 14 5B D4 E5 0A 99 44 47 9D A2 B7 33 3B 0F 69 70 01 23 A0 63 AE 18 AF A9 92 7F 91 39 09 B9 CA 42 44 1C BE F6 9B D0 A1 0C 45 15 F7 28 D1 86 ED'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated is
+# SFI 3 records 1-2 and the Application Interchange Profile (Static Data Authentication Tag List 9F4A)
+- req: '80 01 9F 46 F8 0A BE CD AA 7E 3A 9D 9B AB 68 A5 59 2B 2B B7 6D 0F B6 E2 CA 0E B5 18 AF 05 F1 F8 6B 6B 20 E4 22 A6 80 6A E3 56 F6 4F 47 ED 5A 5E 01 C0 6B 7E 68 A0 A0 2C 3B B1 F5 A6 2B 1B 5B AB 28 FE C0 DE A2 56 0F 1A E2 E7 11 C4 79 BA 35 11 A9 47 32 76 51 E5 9D 63 4C 8B 1C 50 55 8C F2 B6 27 40 96 9B BE D1 20 AC 2A D3 21 47 3F ED 0D 51 BE F8 5E E3 3D AA 59 31 79 42 9F 75 3B 05 99 E1 6D D5 99 02 07 F5 9A B6 84 E6 B3 AB CB D5 DA CA A4 2B A2 75 B9 DB 17 0A EF A6 8D C9 1C 9E 1F AE 20 F2 0B 04 7C A7 77 29 81 B9 09 EC 35 4D 19 C4 5B 4B 31 B7 AB A7 8A F4 08 FC D0 8D FB D0 CD 76 29 F3 B3 03 C1 94 0A 82 89 C9 44 91 BF CA 4A 3E C9 12 80 64 77 3A C7 02 15 B1 14 FD E5 12 7A B0 18 BE 3D AB 51 4D B2 DF E7 08 AB A5 63 E9 B3 69 33 0B 22 DD 73 24 86 0A 86 24 A0 29 AD'
   res: '90 00'

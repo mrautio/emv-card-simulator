@@ -83,6 +83,13 @@ terminal:
     c4_kernel_version: 3
   cryptogram_type: 'AuthorisationRequestCryptogram'
   cryptogram_type_arqc: 'TransactionCertificate'
+  # Authorisation Response Codes that approve the transaction online, '00' is approved in ISO 8583 (EMV Book 4, A6)
+  online_approved_authorisation_response_codes: ['00']
+  # Terminal behaviour that deviates from the specifications, a test enables the deviation it demonstrates
+  protocol_deviations:
+    accept_higher_cryptogram_type: false
+    external_authenticate_without_aip_support: false
+    kernel_2_offline_pin: false
 default_tags:
   '9F1A': '0246'
   '5F2A': 0978

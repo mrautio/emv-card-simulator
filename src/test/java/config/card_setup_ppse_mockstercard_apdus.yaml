@@ -1,4 +1,4 @@
-# Proximity Payment System Environment (EMV Contactless Book B, 3.3)
+# Proximity Payment System Environment (EMV Contactless Book B, 3.3) of Mockstercard, a fake card scheme on top of Kernel 2
 # Select PPSE AID 2PAY.SYS.DDF01
 - req: '00 A4 04 00 0E 32 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
   res: '90 00'
@@ -14,6 +14,6 @@
 # Setup ICC EMV tags
 - req: '80 01 00 84 0E 32 50 41 59 2E 53 59 53 2E 44 44 46 30 31'
   res: '90 00'
-# Directory Entry: ADF Name (4F), Application Label (50), Application Priority Indicator (87), Kernel Identifier (9F2A) '02' Mastercard
-- req: '80 01 BF 0C 1E 61 1C 4F 07 AF FF FF FF FF 12 34 50 0A 4D 41 53 54 45 52 43 41 52 44 87 01 01 9F 2A 01 02'
+# Directory Entry: ADF Name (4F), Application Label (50) "MOCKSTERCARD", Application Priority Indicator (87), Kernel Identifier (9F2A) '02'
+- req: '80 01 BF 0C 20 61 1E 4F 07 AF FF FF FF FF 12 34 50 0C 4D 4F 43 4B 53 54 45 52 43 41 52 44 87 01 01 9F 2A 01 02'
   res: '90 00'

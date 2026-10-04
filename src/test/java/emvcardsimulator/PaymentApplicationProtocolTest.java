@@ -1038,7 +1038,7 @@ public class PaymentApplicationProtocolTest {
         String[] expectedLog = new String[] {
             "80 A8 00 00 02 83 00",
             // Format 1 response starts with 80 like the setup commands
-            "80 0E 3C 00 08 02 02 00 10 01 03 00 18 01 02 01",
+            "80 0E 3C 00 08 02 02 00 10 01 03 00 18 01 02 02",
             "80 CA 9F 36 00",
             "9F 36 02 00 F6",
         };
@@ -1048,7 +1048,7 @@ public class PaymentApplicationProtocolTest {
                 "80 A8 00 00 02 83 00",
                 "61 10",
                 "00 C0 00 00 10",
-                "80 0E 3C 00 08 02 02 00 10 01 03 00 18 01 02 01",
+                "80 0E 3C 00 08 02 02 00 10 01 03 00 18 01 02 02",
                 "80 CA 9F 36 00",
                 "6C 05",
                 "80 CA 9F 36 05",

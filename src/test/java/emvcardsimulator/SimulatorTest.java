@@ -20,9 +20,13 @@ public class SimulatorTest {
 
     private static native void entryPoint(SimulatorTest callback);
 
+    private static native void contactDeclinedEntryPoint(SimulatorTest callback);
+
+    private static native void contactUnableToGoOnlineEntryPoint(SimulatorTest callback);
+
     private static native void mastercardContactlessEntryPoint(SimulatorTest callback);
 
-    private static native void fakeMastercardContactlessPinEntryPoint(SimulatorTest callback);
+    private static native void mockstercardContactlessPinEntryPoint(SimulatorTest callback);
 
     private static native void visaContactlessEntryPoint(SimulatorTest callback);
 
@@ -78,7 +82,25 @@ public class SimulatorTest {
     }
 
     /**
-     * Mastercard contactless (Kernel 2): Relay Resistance Protocol, enciphered offline PIN and CDA.
+     * Contact transaction declined by the issuer: the terminal requests an AAC in the second GENERATE AC.
+     */
+    @Test
+    public void simulatorEndToEndDeclinedTransactionTest() throws CardException {
+        setup(SmartCard.PROTOCOL_T1);
+        SimulatorTest.contactDeclinedEntryPoint(this);
+    }
+
+    /**
+     * Contact transaction where the terminal is unable to go online: second GENERATE AC with Authorisation Response Code 'Y3'.
+     */
+    @Test
+    public void simulatorEndToEndUnableToGoOnlineTransactionTest() throws CardException {
+        setup(SmartCard.PROTOCOL_T1);
+        SimulatorTest.contactUnableToGoOnlineEntryPoint(this);
+    }
+
+    /**
+     * Mastercard contactless (Kernel 2): Relay Resistance Protocol, no CVM and CDA.
      */
     @Test
     public void simulatorEndToEndMastercardContactlessTransactionTest() throws CardException {
@@ -87,12 +109,14 @@ public class SimulatorTest {
     }
 
     /**
-     * Fake Mastercard contactless card for a demonstration: the card deciphers and shows the PIN entered on the terminal.
+     * Mockstercard, a fake card scheme on top of Kernel 2, contactless card for a demonstration: the card deciphers and
+     * shows the PIN entered on the terminal.
+     * The terminal deviates from Kernel 2 by doing offline PIN.
      */
     @Test
-    public void simulatorEndToEndFakeMastercardContactlessPinTest() throws CardException {
+    public void simulatorEndToEndMockstercardContactlessPinTest() throws CardException {
         setup(SmartCard.PROTOCOL_CONTACTLESS);
-        SimulatorTest.fakeMastercardContactlessPinEntryPoint(this);
+        SimulatorTest.mockstercardContactlessPinEntryPoint(this);
     }
 
     /**
