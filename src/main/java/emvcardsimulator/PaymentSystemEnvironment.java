@@ -1,7 +1,6 @@
 package emvcardsimulator;
 
 import javacard.framework.APDU;
-import javacard.framework.Applet;
 import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.Util;
@@ -19,12 +18,11 @@ public class PaymentSystemEnvironment extends EmvApplet {
         (new PaymentSystemEnvironment()).register();
     }
 
-    private void processSetSettings(APDU apdu, byte[] buf) {
+    protected void processSetSettings(APDU apdu, byte[] buf, short dataLength) {
         short settingsId = Util.getShort(buf, ISO7816.OFFSET_P1);
         switch (settingsId) {
             // FALLBACK READ RECORD
             case 0x0006:
-                short dataLength = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
                 defaultReadRecord = null;
                 defaultReadRecord = new byte[dataLength];
                 Util.arrayCopy(buf, (short) ISO7816.OFFSET_CDATA, defaultReadRecord, (short) 0, dataLength);
@@ -40,111 +38,33 @@ public class PaymentSystemEnvironment extends EmvApplet {
         super();
     }
 
-    private void processSelect(APDU apdu, byte[] buf) {
+    protected void processSelect(APDU apdu, byte[] buf) {
         // Check if AID (tag 84) exists in the ICC
         if (EmvTag.findTag((short) 0x84) != null) {
-            if (tagBf0cFci != null) {
-                short length = tagBf0cFci.expandTlvToArray(tmpBuffer, (short) 0);
-                EmvTag.setTag((short) 0xBF0C, tmpBuffer, (short) 0, (byte) length);
-            }
+            // Templates without tag list keep the stored tag, e.g. FCI Issuer Discretionary Data with several Directory Entries (tag 61)
+            expandFciTemplate(tagBf0cFci, (short) 0xBF0C);
+            expandFciTemplate(tagA5Fci, (short) 0xA5);
+            expandFciTemplate(tag6fFci, (short) 0x6F);
 
-            if (tagA5Fci != null) {
-                short length = tagA5Fci.expandTlvToArray(tmpBuffer, (short) 0);
-                EmvTag.setTag((short) 0xA5, tmpBuffer, (short) 0, (byte) length);
-            }
-
-            if (tag6fFci != null) {
-                short length = tag6fFci.expandTlvToArray(tmpBuffer, (short) 0);
-                EmvTag.setTag((short) 0x6F, tmpBuffer, (short) 0, (byte) length);
-                sendResponse(apdu, buf, (short) 0x6F);
-            } else {
-                EmvApplet.logAndThrow(ISO7816.SW_APPLET_SELECT_FAILED);
-            }
-
+            sendResponse(apdu, buf, (short) 0x6F);
         } else {
             // NO PAN, we're probably in the setup phase
             EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
         }
     }
 
-    protected void processReadRecord(APDU apdu, byte[] buf) {
-        short p1p2 = Util.getShort(buf, ISO7816.OFFSET_P1);
-
-        ReadRecord readRecord = ReadRecord.findRecord(p1p2);
-        if (readRecord == null) {
-            if (defaultReadRecord != null) {
-                short p1p2Fallback = Util.getShort(defaultReadRecord, (short) 0);
-                readRecord = ReadRecord.findRecord(p1p2Fallback);
-            }
-
-            if (readRecord == null) {
-                EmvApplet.logAndThrow(ISO7816.SW_RECORD_NOT_FOUND);
-            }
-        }
-
-        short tag70Length = readRecord.copyDataToArray(tmpBuffer, (short) 0);
-
-        EmvTag tag = EmvTag.setTag((short) 0x0070, tmpBuffer, (short) 0, (byte) tag70Length);
-
-        if (buf[ISO7816.OFFSET_LC] != (byte) 0x00 && buf[ISO7816.OFFSET_LC] != tag.getLength()) {
-            EmvApplet.logAndThrow(ISO7816.SW_WRONG_LENGTH);
-        }
-
-        sendResponse(apdu, buf, (short) 0x0070);
+    protected short expandReadRecord(ReadRecord readRecord, byte[] dst, short dstOffset) {
+        // PSE records are stored as raw data
+        return readRecord.copyDataToArray(dst, dstOffset);
     }
 
-    /**
-     * Process PSE application selection and read records.
-     */
-    public void process(APDU apdu) {
-        byte[] buf = apdu.getBuffer(); 
-
-        ApduLog.addLogEntry(buf, (short) 0, (byte) (buf[ISO7816.OFFSET_LC] + 5));
-
-        short cmd = Util.getShort(buf, ISO7816.OFFSET_CLA);
-
-        switch (cmd) {
-            case CMD_SELECT:
-                processSelect(apdu, buf);
-                return;
-            case CMD_SET_SETTINGS:
-                processSetSettings(apdu, buf);
-                return;
-            case CMD_SET_EMV_TAG:
-                processSetEmvTag(apdu, buf);
-                return;
-            case CMD_SET_EMV_TAG_FUZZ:
-                processSetEmvTagFuzz(apdu, buf);
-                return;
-            case CMD_SET_TAG_TEMPLATE:
-                processSetTagTemplate(apdu, buf);
-                return;
-            case CMD_SET_READ_RECORD_TEMPLATE:
-                processSetReadRecordTemplate(apdu, buf);
-                return;
-            case CMD_FACTORY_RESET:
-                factoryReset(apdu, buf);
-                return;
-            case CMD_FUZZ_RESET:
-                fuzzReset(apdu, buf);
-                return;
-            case CMD_LOG_CONSUME:
-                consumeLogs(apdu, buf);
-                return;
-            default:
-                break;
-        }
-
-        if (selectingApplet()) {
-            return;
-        }
-
+    protected void processCommand(APDU apdu, byte[] buf, short cmd, short dataLength) {
         switch (cmd) {
             case CMD_READ_RECORD:
                 processReadRecord(apdu, buf);
                 break;
             default:
-                EmvApplet.logAndThrow(ISO7816.SW_INS_NOT_SUPPORTED);
+                commandNotSupported(cmd);
         }
     }
 }

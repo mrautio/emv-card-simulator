@@ -12,6 +12,13 @@ plugins {
 
 apply plugin: 'java'
 
+// JavaCard targets need Java 7 (or older) class files, which JDK 9+ javac cannot produce
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+}
+
 // set default properties
 // override in command line like: gradle deployPaymentApp -Pjc_version=2.2.2 -Ppaymentapp_cap_aid=A000000123456
 if (!project.hasProperty("jc_version")) {
@@ -75,8 +82,8 @@ tasks.withType(Test) {
 }
 
 checkstyle {
-    // Align version with verification-metadata.xml
-    toolVersion '8.27';
+    // 9.3 is the last Checkstyle release that runs on Java 8
+    toolVersion '9.3';
 }
 
 checkstyleMain {
@@ -100,10 +107,14 @@ configurations {
 
 dependencies {
 
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:latest.release'
+    // JUnit 6 requires Java 17, stay on JUnit 5 while building on Java 8
+    testRuntimeOnly (
+        'org.junit.jupiter:junit-jupiter-engine:5.+',
+        'org.junit.platform:junit-platform-launcher:1.+'
+    )
 
     testImplementation (
-        'org.junit.jupiter:junit-jupiter-api:latest.release',
+        'org.junit.jupiter:junit-jupiter-api:5.+',
         'com.klinec:jcardsim:latest.release'
     )
     implementation (
@@ -118,14 +129,39 @@ test {
 
     useJUnitPlatform()
 
+    // Private test cards are tested with testPrivateCards
+    exclude '**/PrivateCardTest*'
+
     testLogging {
         outputs.upToDateWhen { false }
-        events "started", "skipped", "failed"
+        events "started", "passed", "skipped", "failed"
         exceptionFormat "full"
         showStandardStreams true
     }
 
     failFast = false
+}
+
+task testPrivateCards(type: Test) {
+    dependsOn buildSimulatorLibrary
+    group "Verification"
+    description "Run transactions of the private test cards in private/cards against emvpt, -PprivateCards=<path part> selects cards"
+    workingDir 'src/test/java/emvcardsimulator'
+    systemProperty 'privateCards', project.findProperty('privateCards') ?: ''
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+
+    useJUnitPlatform()
+    filter {
+        includeTestsMatching 'emvcardsimulator.PrivateCardTest'
+    }
+
+    testLogging {
+        outputs.upToDateWhen { false }
+        events "passed", "skipped", "failed"
+        exceptionFormat "short"
+        showStandardStreams true
+    }
 }
 
 compileJava {
@@ -200,6 +236,20 @@ task cap {
             }
         }
 
+        // 2PAY.SYS.DDF01
+        ant.javacard(jckit: "oracle_javacard_sdks/${jc_sdk}") {
+            cap (
+                package: 'emvcardsimulator',
+                version: '0.1',
+                output: 'build/ppse.cap',
+                jca: 'build/ppse.jca',
+                export: 'build',
+                classes: "build/classes/java/main",
+                aid: '325041592E000000000000000000') {
+                    applet (class: 'emvcardsimulator.ProximityPaymentSystemEnvironment', aid: '325041592E5359532E4444463031')
+            }
+        }
+
         ant.javacard(jckit: "oracle_javacard_sdks/${jc_sdk}") {
             cap (
                 package: 'emvcardsimulator',
@@ -224,6 +274,14 @@ task deployPse(type: Exec) {
     description "Deploy PaymentSystemEnvironment applet to JavaCard"
 
     commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/pse.cap'
+}
+
+task deployPpse(type: Exec) {
+    dependsOn downloadGp, cap
+    group "JavaCard"
+    description "Deploy ProximityPaymentSystemEnvironment applet to JavaCard"
+
+    commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/ppse.cap'
 }
 
 task deployPaymentApp(type: Exec) {

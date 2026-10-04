@@ -1,4 +1,4 @@
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use emvpt::*;
 use hex;
 use log::{debug, error, warn, LevelFilter};
@@ -194,36 +194,34 @@ fn run() -> Result<Option<String>, String> {
     // TODO: Easier way to setup fuzzing
     // TODO: Data log dumping
 
-    let matches = App::new("Card tool")
+    let matches = Command::new("Card tool")
         .version("0.1")
         .about("Card configuration utility belt")
         .arg(
-            Arg::with_name("load")
+            Arg::new("load")
                 .long("load")
                 .help("Sends APDU commands from file to card")
                 .value_name("FILE")
-                .takes_value(true),
         )
         .arg(
-            Arg::with_name("send-apdu")
+            Arg::new("send-apdu")
                 .long("send-apdu")
                 .help("Sends hex string APDU command")
                 .value_name("COMMAND")
-                .takes_value(true),
         )
         .arg(
-            Arg::with_name("settings")
-                .short("s")
+            Arg::new("settings")
+                .short('s')
                 .long("settings")
                 .value_name("settings file")
                 .help("Settings file location")
-                .takes_value(true),
         )
         .get_matches();
 
     let mut connection = EmvConnection::new(
         &matches
-            .value_of("settings")
+            .get_one::<String>("settings")
+            .map(String::as_str)
             .unwrap_or("../config/settings.yaml")
             .to_string(),
     )
@@ -241,18 +239,14 @@ fn run() -> Result<Option<String>, String> {
     }
     connection.interface = Some(&smart_card_connection);
 
-    if matches.is_present("send-apdu") {
-        let request =
-            ApduRequestResponse::to_raw_vec(&matches.value_of("send-apdu").unwrap().to_string());
+    if let Some(send_apdu) = matches.get_one::<String>("send-apdu") {
+        let request = ApduRequestResponse::to_raw_vec(send_apdu);
 
         connection.send_apdu(&request);
 
         return Ok(None);
-    } else if matches.is_present("load") {
-        ApduRequestResponse::execute_setup_apdus(
-            &mut connection,
-            matches.value_of("load").unwrap(),
-        )
+    } else if let Some(load) = matches.get_one::<String>("load") {
+        ApduRequestResponse::execute_setup_apdus(&mut connection, load)
         .unwrap();
 
         return Ok(None);

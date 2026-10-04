@@ -30,6 +30,14 @@ If you have all developer tools existing, or enter to `nix-shell`, then you can 
 gradle build
 ```
 
+## Private test cards
+
+Card setup APDU files in a git ignored `private/cards` directory are tested against [emvpt](https://github.com/mrautio/emvpt) with contact and contactless transactions, emvpt settings are in `private/config/settings.yaml`.
+
+```sh
+gradle testPrivateCards
+```
+
 ## Update dependencies
 
 Run the [GitHub Actions Workflow](https://github.com/mrautio/emv-card-simulator/actions/workflows/update-dependencies.yml).
@@ -41,6 +49,8 @@ If you have a SmartCard reader and a Global Platform compliant SmartCard, then y
 ```sh
 # Deploy payment selection app to a JavaCard 2 SmartCard 
 gradle deployPse -Pjc_version=2.2.2
+# Deploy contactless payment selection app (PPSE) to a JavaCard 2 SmartCard
+gradle deployPpse -Pjc_version=2.2.2
 # Deploy the payment app to a JavaCard 2 SmartCard 
 gradle deployPaymentApp -Pjc_version=2.2.2
 ```

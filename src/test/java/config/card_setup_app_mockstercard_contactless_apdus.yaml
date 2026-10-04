@@ -1,0 +1,16 @@
+# Mockstercard, a fake card scheme on top of Kernel 2, contactless card for a demonstration, applied after card_setup_app_mastercard_contactless_apdus.yaml:
+# the card asks for the enciphered offline PIN and deciphers it with the ICC private key. Kernel 2 does not support offline PIN,
+# only a reader that does offline PIN on the contactless interface sends the PIN to the card.
+- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
+  res: '90 00'
+# Application Label in FCI
+- req: '80 01 00 50 0C 4D 4F 43 4B 53 54 45 52 43 41 52 44'
+  res: '90 00'
+# CVM List: enciphered PIN verified by ICC if the terminal supports it (apply succeeding CVM Rule if unsuccessful),
+# otherwise No CVM required
+- req: '80 01 00 8E 0C 00 00 00 00 00 00 00 00 44 03 1F 03'
+  res: '90 00'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated is
+# SFI 3 records 1-2 and the Application Interchange Profile (Static Data Authentication Tag List 9F4A)
+- req: '80 01 9F 46 F8 52 4A 8E C3 D6 AD A2 62 13 38 16 C9 08 10 26 E1 9C 1E D0 D7 F4 ED 5D 35 5D D6 CB 5B 70 3E 80 68 96 F1 8D 10 1C 1D 41 D8 11 36 FA 5B 20 A3 D7 34 9F E0 7C 48 8D AA 29 AD 4B EF A3 E0 13 35 9C AC 94 03 D2 4E 9A 89 BF 7C 48 96 2A C8 87 A7 13 E4 7A B9 76 25 91 41 32 08 97 91 85 AF 81 B3 2A A4 93 32 E1 B2 99 50 35 BA 74 8F F2 61 14 22 02 BD 98 23 82 0A 98 75 62 68 6B 0D 6B 00 0F EC 47 B8 43 46 9D AF 60 86 75 AB 83 9F 70 B0 59 CE 53 A3 02 89 F5 47 02 51 6D EA 5F 59 45 70 AE BB F4 75 16 4E 2A BA 13 16 09 E0 6A 35 30 D5 79 39 19 A7 F3 8E 67 6E 40 FF BA F9 73 89 C2 1A 77 89 80 BC 4F B5 12 A4 84 22 6C 64 C5 1E D9 E2 C7 48 1C 6E 76 40 6B B3 A2 B3 CF B6 D3 2B 99 94 A3 16 06 2A 10 88 44 AD 40 B1 C9 68 2F 89 B7 53 2A 4D 4C 35 77 6A B1 A3 D9 F8 14 29'
+  res: '90 00'

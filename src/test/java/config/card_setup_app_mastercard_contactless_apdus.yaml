@@ -1,0 +1,40 @@
+# Mastercard contactless (EMV Contactless Book C-2, Kernel 2) profile: M/Chip with CDA, Relay Resistance Protocol and no CVM.
+# Applied after card_setup_app_apdus.yaml, only the differing data objects are set here.
+- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
+  res: '90 00'
+# Relay Resistance Protocol timing (EMV Contactless Book C-2, 3.10 and 5.3), in units of hundreds of microseconds:
+# Min Time For Processing Relay Resistance APDU (2) || Max Time For Processing Relay Resistance APDU (2) ||
+# Device Estimated Transmission Time For Relay Resistance R-APDU (2): min 0.0 ms, max 20.0 ms, transmission 1.8 ms.
+# Relay resistance data of the latest exchange is included in the CDA signature (C-2, Table 6.8).
+- req: '80 00 00 0A 06 00 00 00 C8 00 12'
+  res: '90 00'
+# Application Interchange Profile: cardholder verification, terminal risk management and CDA supported (byte 1),
+# EMV mode and Relay Resistance Protocol supported (byte 2, EMV Contactless Book C-2, A.1.16)
+- req: '80 01 00 82 02 19 81'
+  res: '90 00'
+# CVM List: enciphered PIN verified online if the terminal supports it, otherwise No CVM required. Kernel 2 has no offline PIN
+# (no VERIFY command in EMV Contactless Book C-2), and Mastercard has removed the signature CVM.
+- req: '80 01 00 8E 0C 00 00 00 00 00 00 00 00 42 03 1F 03'
+  res: '90 00'
+# Issuer Application Data of M/Chip: Key Derivation Index '01', Cryptogram Version Number 14 (EMV Common Session Key derivation),
+# CVR (6), DAC/ICC Dynamic Number (2) and counters (8). Mastercard CVR at offset 2, the card updates it. The Application Cryptogram is
+# generated over the data of the base profile (CDOL1 related data || AIP || ATC || IAD), not over the M/Chip CVN 14 data.
+- req: '80 01 9F 10 12 01 14 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00'
+  res: '90 00'
+- req: '80 00 00 0D 02 03 02'
+  res: '90 00'
+# Application Version Number of M/Chip
+- req: '80 01 9F 08 02 00 02'
+  res: '90 00'
+# Application Label in FCI, no Application Preferred Name
+- req: '80 01 00 50 0A 4D 41 53 54 45 52 43 41 52 44'
+  res: '90 00'
+- req: '80 02 00 05 06 00 50 00 87 5F 2D'
+  res: '90 00'
+# Cardholder name and Track 1 Discretionary Data are not available on the contactless interface, SFI 1 record 2 has only the Track 2
+- req: '80 03 02 0C 02 00 57'
+  res: '90 00'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated is
+# SFI 3 records 1-2 and the Application Interchange Profile (Static Data Authentication Tag List 9F4A)
+- req: '80 01 9F 46 F8 57 DD 65 67 E9 0E 5E 58 AF A4 62 C5 4A F6 0B 56 8D 7F D7 51 41 C8 E1 AA FD C1 19 70 22 E2 95 20 A3 3C 83 44 43 7E 4D BE 0D 81 92 20 C1 32 9A 8B AA C7 26 6A 6C 25 23 0C FF B4 72 01 4F 0E B4 95 FB 35 47 E2 4A B5 1C B0 16 80 0B 8C 15 58 8F 12 0D 5E 55 0D 4D 7B C9 62 4C 89 0C 78 86 87 0D 57 48 D5 79 B6 70 56 75 9B 8C D6 92 C4 7F AB BC D8 5C 39 39 4D E6 D3 EC BA 41 6B 86 F4 0D DF 30 65 94 B5 8F B6 A8 4D 71 B5 10 83 93 16 CC 08 1C A5 36 5A 25 87 7F AF C5 16 51 31 6F F8 94 77 7C 2D 23 58 5E 50 70 64 38 8D 97 0A 02 81 3B FE A8 BC 27 B7 98 F5 B3 9C 66 27 D8 B4 08 1A 4C 01 4B 6F 94 64 05 F9 77 81 6A 71 59 9B 35 8D 42 86 76 35 1F 41 4A 7D 9F AA 12 CF 57 BC 8F F8 99 84 4E BD 45 94 4D 71 B6 37 E4 4E 7F 16 CA CD D1 60 BC 32 42 31 90 71 D0 0F 96 0D'
+  res: '90 00'

@@ -16,14 +16,31 @@ public class TagTemplate {
 
     /**
      * Set BER-TLV EMV tag list. All tags should be stored as EmvTag before serialization.
+     * Tag entries are BER-TLV tags of one to three bytes, a one byte tag may also be prefixed with '00', see EmvTag.tagEntryLength.
      */
     public void setData(byte[] src, short srcOffset, byte length) {
-        if (length % 2 != 0) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-        }
-
         this.length = length;
         Util.arrayCopy(src, srcOffset, data, (short) 0, (short) (this.length & 0x00FF));
+    }
+
+    /**
+     * Set tag list as a copy of another template, replacing tag fromTagId with toTagId.
+     */
+    public void setDataReplacingTag(TagTemplate src, short fromTagId, short toTagId) {
+        setData(src.getData(), (short) 0, src.getLength());
+
+        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += EmvTag.tagEntryLength(data, i)) {
+            if (isTagEntry(i, fromTagId)) {
+                Util.setShort(data, i, toTagId);
+            }
+        }
+    }
+
+    /**
+     * True if the tag entry at offset is the one or two byte tag tagId in two byte form.
+     */
+    private boolean isTagEntry(short offset, short tagId) {
+        return EmvTag.tagEntryLength(data, offset) == (short) 2 && Util.getShort(data, offset) == tagId;
     }
 
     /**
@@ -44,12 +61,21 @@ public class TagTemplate {
      * Retrieve all tag data from EmvTag and copy to destination array as BER-TLV encoded.
      */
     public short expandTlvToArray(byte[] dst, short dstOffset) {
+        return expandTlvToArray(dst, dstOffset, (short) 0);
+    }
+
+    /**
+     * Retrieve all tag data except skipTagId from EmvTag and copy to destination array as BER-TLV encoded.
+     */
+    public short expandTlvToArray(byte[] dst, short dstOffset, short skipTagId) {
 
         short dataOffset = dstOffset;
-        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += (short) 2) {
-            short tagId = Util.getShort(data, i);
+        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += EmvTag.tagEntryLength(data, i)) {
+            if (skipTagId != 0 && isTagEntry(i, skipTagId)) {
+                continue;
+            }
 
-            EmvTag tag = EmvTag.findTag(tagId);
+            EmvTag tag = EmvTag.findTag(data, i);
 
             if (tag == null) {
                 ISOException.throwIt(ISO7816.SW_DATA_INVALID);
@@ -67,10 +93,8 @@ public class TagTemplate {
     public short expandTagDataToArray(byte[] dst, short dstOffset) {
 
         short dataOffset = dstOffset;
-        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += (short) 2) {
-            short tagId = Util.getShort(data, i);
-
-            EmvTag tag = EmvTag.findTag(tagId);
+        for (short i = (short) 0; i < (short) (this.length & 0x00FF); i += EmvTag.tagEntryLength(data, i)) {
+            EmvTag tag = EmvTag.findTag(data, i);
 
             if (tag == null) {
                 ISOException.throwIt(ISO7816.SW_DATA_INVALID);

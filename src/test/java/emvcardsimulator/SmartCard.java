@@ -2,15 +2,12 @@ package emvcardsimulator;
 
 import com.licel.jcardsim.smartcardio.CardSimulator;
 import com.licel.jcardsim.utils.AIDUtil;
-
 import java.io.OutputStream;
 import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
 import java.util.List;
-
 import javacard.framework.AID;
 import javacard.framework.Applet;
-
 import javax.smartcardio.Card;
 import javax.smartcardio.CardException;
 import javax.smartcardio.CardTerminals.State;
@@ -21,6 +18,11 @@ import javax.smartcardio.ResponseAPDU;
  * SmartCard interface simulator. Helper utility for unit testing.
  */
 public class SmartCard {
+    // Transport protocols of jcardsim, the protocol of the contact interface is negotiated after the ATR (ISO/IEC 7816-3)
+    public static final String PROTOCOL_T0 = "T=0";
+    public static final String PROTOCOL_T1 = "T=1";
+    // Contactless interface, ISO/IEC 14443-4 type A
+    public static final String PROTOCOL_CONTACTLESS = "T=CL,TYPE_A,T1";
 
     private static CardSimulator cardSimulator;
 
@@ -76,11 +78,34 @@ public class SmartCard {
     }
 
     /**
-     * Initialize simulator for test suite.
+     * Initialize simulator for test suite, the transport protocol is T=0.
      * @throws CardException
      */
     public static void connect() throws CardException {
+        connect(PROTOCOL_T0);
+    }
+
+    /**
+     * Initialize simulator for test suite with the transport protocol.
+     * @throws CardException
+     */
+    public static void connect(String protocol) throws CardException {
         cardSimulator = new CardSimulator();
+        cardSimulator.changeProtocol(protocol);
+    }
+
+    /**
+     * Change the transport protocol, e.g. from the contact to the contactless interface, the applets keep their data.
+     */
+    public static void changeProtocol(String protocol) {
+        cardSimulator.changeProtocol(protocol);
+    }
+
+    /**
+     * True if the transport protocol is T=0.
+     */
+    public static boolean isProtocolT0() {
+        return PROTOCOL_T0.equals(cardSimulator.getProtocol());
     }
 
     /**

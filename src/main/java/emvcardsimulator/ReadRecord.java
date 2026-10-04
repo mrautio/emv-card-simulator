@@ -7,10 +7,10 @@ public class ReadRecord extends TagTemplate {
 
     protected ReadRecord next;
     protected ReadRecord previous;
-    private static ReadRecord head = null;
-    private static ReadRecord tail = null;
 
     private byte[] record;
+    // Record data is the record as is, not a tag list
+    private boolean raw;
 
     protected ReadRecord(short recordId, byte[] src, short srcOffset, byte length) {
         record = new byte[2];
@@ -21,37 +21,53 @@ public class ReadRecord extends TagTemplate {
             setData(src, srcOffset, length);
         }
 
+        DataStore store = DataStore.current;
         next = null;
-        previous = tail;
+        previous = store.recordTail;
         if (previous != null) {
             previous.next = this;
         }
 
-        if (head == null) {
-            head = this;
+        if (store.recordHead == null) {
+            store.recordHead = this;
         }
-        tail = this;
+        store.recordTail = this;
     }
 
     /**
      * Add or update READ RECORD TLV tag list.
      */
     public static ReadRecord setRecord(short recordId, byte[] src, short srcOffset, byte length) {
+        return setRecord(recordId, src, srcOffset, length, false);
+    }
+
+    /**
+     * Add or update READ RECORD TLV tag list, or the record as is when raw.
+     */
+    public static ReadRecord setRecord(short recordId, byte[] src, short srcOffset, byte length, boolean raw) {
         ReadRecord readRecord = ReadRecord.findRecord(recordId);
         if (readRecord == null) {
             readRecord = new ReadRecord(recordId, src, srcOffset, length);
         } else {
             readRecord.setData(src, srcOffset, length);
         }
+        readRecord.raw = raw;
 
         return readRecord;
+    }
+
+    /**
+     * True if the record data is the record as is, e.g. a record template '70' of a personalization data grouping.
+     */
+    public boolean isRaw() {
+        return raw;
     }
 
     /**
      * Find record.
      */
     public static ReadRecord findRecord(short record) {
-        for (ReadRecord iter = ReadRecord.head; iter != null; iter = iter.next) {
+        for (ReadRecord iter = DataStore.current.recordHead; iter != null; iter = iter.next) {
             short iterRecord = Util.getShort(iter.record, (short) 0);
             if (record == iterRecord) {
                 return iter;
@@ -67,7 +83,7 @@ public class ReadRecord extends TagTemplate {
     public static short clear() {
         short count = (short) 0;
 
-        for (ReadRecord iter = ReadRecord.head; iter != null; ) {
+        for (ReadRecord iter = DataStore.current.recordHead; iter != null; ) {
             short iterRecord = Util.getShort(iter.record, (short) 0);
 
             iter = iter.next;
@@ -96,13 +112,15 @@ public class ReadRecord extends TagTemplate {
         ReadRecord previousRecord = record.previous;
         ReadRecord nextRecord = record.next;
 
+        DataStore store = DataStore.current;
+
         JCSystem.beginTransaction();
 
-        if (head == record) {
-            head = nextRecord;
+        if (store.recordHead == record) {
+            store.recordHead = nextRecord;
         }
-        if (tail == record) {
-            tail = previousRecord;
+        if (store.recordTail == record) {
+            store.recordTail = previousRecord;
         }
         if (previousRecord != null) {
             previousRecord.next = nextRecord;
@@ -120,7 +138,7 @@ public class ReadRecord extends TagTemplate {
      * Get first READ RECORD entry.
      */
     public static ReadRecord getHead() {
-        return ReadRecord.head;
+        return DataStore.current.recordHead;
     }
 
     /**

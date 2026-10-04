@@ -13,11 +13,54 @@
   res: '90 00'
 # ICC RSA Key = icc_1234560012345608_e_3_private_key.pem
 # ICC RSA Key modulus
-- req: '80 00 00 04 80 C0 C3 22 9F B5 DA 18 D0 71 84 16 DD 70 C4 95 B1 49 5A 18 38 B7 A1 D6 AF F2 C0 78 AB F2 4D 30 73 C0 CB F1 F8 FB 7D 7C 4E EF 92 5E 00 C3 57 B0 9D D2 ED 29 6B 15 89 8C C0 2A 0A 68 BE AE B5 96 AE DF 7E 5D 7A F7 71 8F 48 E4 D4 B0 1B 53 FC 44 4E B5 81 2D 3E 3B C1 86 93 8D 71 1A 89 29 6D 80 AA 4E D3 49 B2 6A FD E3 C1 07 22 1B 98 E8 0B EB 60 4D 99 F0 98 5D 43 48 D4 A7 D9 1A DE A0 97 1B FD'
+- req: '80 00 00 04 F8 C8 61 C4 FC A5 76 03 2E EE 3F 65 E0 4D 62 32 ED 63 67 9A E9 E7 FE C9 7F 9C 6C 4C C9 DF 70 47 6F 50 1C 45 69 98 86 23 B9 23 38 DF A5 F1 53 39 E8 15 02 A6 4D B5 8B 39 6A 6B 57 39 6F D9 D6 46 7C 00 4B 8E C2 0F 9E E0 9F A2 AA B2 52 15 2C 15 63 5E FA F1 63 72 9F EB E4 AD 02 B3 1B 3D F0 03 11 4E 36 BC 8F 59 68 4F 07 AA 59 D8 08 F3 82 B8 92 AB FB DF CC EE 9E 6D 05 1B 70 58 6C DA DF 78 A4 28 8F F6 B3 17 18 84 F1 E0 78 1E 73 A6 75 12 0E 57 63 CA A2 85 D8 59 F1 AE 50 44 58 21 21 D2 4A 2F 0D 2C 13 41 B7 CD 57 47 9B FA 68 E0 38 48 72 DB DE F0 80 22 7B 00 BC 81 94 FC 4F CB C1 72 EC 72 57 3C 0C AE 45 74 55 29 73 0A 08 96 4E 28 59 98 23 5F 68 D7 29 CC 0D E3 AF F4 1A 3E A5 D2 27 2C 92 88 C6 C4 71 49 26 D9 41 B0 4B 3C A1 D5 1F BE 29 C8 7D B6 A9 63 D1'
   res: '90 00'
 # ICC RSA Key private exponent
-- req: '80 00 00 05 80 80 82 17 15 23 E6 BB 35 A1 02 B9 E8 F5 D8 63 CB 86 3C 10 25 CF C1 39 CA A1 D5 A5 C7 F6 DE 20 4D 2B 32 A1 50 A7 A8 FD 89 F5 0C 3E AB 2C E5 20 69 37 48 C6 47 63 B1 08 80 1C 06 F0 7F 1F 23 B9 C8 C1 EB B7 49 BA 7C BC 99 C3 50 7F 7B 52 A8 49 B1 AA 10 1D 8B FE 2D 59 D2 84 08 F2 B6 56 27 5B B4 84 5B 09 91 43 34 5F 69 94 A5 ED 97 AB 7A FF 3A A3 B1 05 21 4A 9F 8F 8A 6C 01 B4 3F 6E 38 8D AB'
+- req: '80 00 00 05 F8 85 96 83 53 18 F9 57 74 9E D4 EE 95 88 EC 21 F3 97 9A 67 46 9A A9 DB AA 68 48 33 31 3F A0 2F 9F 8A BD 83 9B BB 04 17 D0 C2 25 EA 6E A0 E2 26 9A B8 AC 6E DE 79 07 7B 9C 47 8F 7B 9F E6 8E D9 A8 00 32 5F 2C 0A 69 EB 15 17 1C 76 E1 63 72 B8 EC E9 FC A0 EC F7 15 47 ED C8 AC 77 67 7E A0 02 0B 89 79 D3 0A 3B 9A DF 5A 71 91 3A B0 A2 57 25 B7 1D 52 95 33 49 BE F3 58 BC F5 90 47 63 B5 49 48 86 B1 C2 DE DA 09 DB AA 7E 12 57 E4 2A E3 2D F4 E7 74 C6 14 11 A3 55 E4 FB 7A 86 45 7D 0A B5 4E 04 1E 6D 26 50 D1 80 BA D7 45 A5 53 3E 35 6D 3A 7D 66 6B C8 BF 92 93 BD 53 A0 A5 B0 07 9B D7 83 83 5D 13 76 FB 55 EA 34 62 A8 CE FC 77 C3 7F 27 16 04 C9 42 E9 E5 61 22 1F EC 4F 54 A9 B2 48 F9 83 E1 50 FE 4A 7D 6A 85 6A 1E 0D AF 9C 39 DC BB E8 17 76 D8 99 A3 86 AB'
   res: '90 00'
+# ICC Application Cryptogram Master Key MK_AC (double length 3DES). When set, Application Cryptogram (9F26)
+# is generated with EMV Book 2 Common Session Key Derivation (A1.3.1) and ISO/IEC 9797-1 MAC Algorithm 3 (A1.2.1)
+# over CDOL related data || AIP || ATC || Issuer Application Data (9F10) when the IAD flag is set, as in Visa Cryptogram Version
+# Number 18 of the Issuer Application Data of this profile. Clear the key with empty data ('80 00 00 07 00') to use the static 9F26 tag value.
+- req: '80 00 00 07 10 01 23 45 67 89 AB CD EF FE DC BA 98 76 54 32 10'
+  res: '90 00'
+# Flags: random, Issuer Application Data included in the Application Cryptogram (Cryptogram Version Number 18)
+- req: '80 00 00 03 02 00 03'
+  res: '90 00'
+# ARPC method for issuer authentication (EMV Book 2, 8.2) in EXTERNAL AUTHENTICATE or tag 91 in CDOL2:
+# '01' = Method 1, Issuer Authentication Data ARPC (8) || ARC (2)
+# '02' = Method 2, Issuer Authentication Data ARPC (4) || CSU (4) || Proprietary Authentication Data (0-8)
+# Second GENERATE AC returns AAC when issuer authentication has failed.
+- req: '80 00 00 08 01 01'
+  res: '90 00'
+# ICC Secure Messaging for Integrity Master Key MK_SMI (double length 3DES) for issuer script commands.
+# Secure messaging format 1 (CLA '8C' / '0C') with MAC chaining, EMV Book 2 9.2 and Annex D2, or format 2 (CLA '84' / '04') of the
+# payment systems: data || 8-byte MAC over CLA INS P1 P2 Lc || ATC || Application Cryptogram || data.
+- req: '80 00 00 09 10 89 AB CD EF 01 23 45 67 76 54 32 10 FE DC BA 98'
+  res: '90 00'
+# Relay Resistance Protocol timing '80 00 00 0A 06', see card_setup_app_mastercard_contactless_apdus.yaml
+# Optional settings, see PaymentApplication.processSetSettings:
+# Flags ('80 00 00 03 02 00 xx'), xx is a sum of: '01' random, '02' IAD in AC, '04' qVSDC (Application Cryptogram and fDDA in
+# GET PROCESSING OPTIONS response, cryptogram type from Terminal Transaction Qualifiers 9F66 in PDOL), '08' card risk management.
+# Card risk management uses Lower/Upper Consecutive Offline Limit tags 9F14/9F23, Offline Accumulator Balance 9F50 and
+# cumulative offline amount limits: '80 00 00 0E 0C' || lower (6) || upper (6), n12 like 9F02, zero is no limit.
+# Card Verification Results in Issuer Application Data 9F10: '80 00 00 0D 02' || format || offset,
+# format '01' Common Core Definitions CVR (5 bytes), '02' Visa CVR ('03' + 3 bytes), e.g. '80 00 00 0D 02 02 03' for this profile,
+# '03' Mastercard M/Chip CVR (6 bytes), e.g. '80 00 00 0D 02 03 02' in card_setup_app_mastercard_contactless_apdus.yaml.
+# ICC PIN Encipherment key for enciphered offline PIN: modulus '80 00 00 0F', private exponent '80 00 00 10', empty modulus clears it.
+# Mag-stripe mode COMPUTE CRYPTOGRAPHIC CHECKSUM: KD_CVC3 '80 00 00 0B 10' || key, IVCVC3 Track1 (2) || Track2 (2) '80 00 00 0C 04',
+# UDOL tag 9F69 (default '9F 6A 04'), response template id 7 (default 9F61 9F60 9F36).
+# PUT DATA writable tags (Data Storage, balance): '80 00 00 11' || tag list, e.g. '80 00 00 11 04 DF 61 9F 50'.
+# RECOVER AC of a torn first GENERATE AC is supported when DRDOL tag 9F51 exists.
+# Transaction log is written when Log Entry 9F4D (SFI, number of records) and Log Format 9F4F exist.
+# Tags of three bytes are set with P1 P2 '00 00' and the tag before the value, e.g. '80 01 00 00 05 DF 81 01 AA BB'.
+# Data objects in the value of a constructed tag, e.g. FCI Proprietary Template A5, are card data as well.
+# Record as is: '80 04' || record number || SFI << 3 | 4 || Lc || '70' record template, its data objects are card data.
+# Interface of the following tags and GET PROCESSING OPTIONS response template: '80 00 00 12 01' || '00' both (default),
+# '01' contact or '02' contactless, an interface specific tag takes precedence over a tag of both interfaces.
+# ICC private key as CRT components: p '80 00 00 13', q '80 00 00 14', d mod (p - 1) '80 00 00 15', d mod (q - 1) '80 00 00 16',
+# q^-1 mod p '80 00 00 17'. PIN Try Limit (default 3): '80 00 00 18 01' || limit.
+# Default templates: FCI 84 A5, GENERATE AC 9F27 9F36 9F26 9F10, INTERNAL AUTHENTICATE 9F4B. ATC starts from zero when 9F36 is not set.
 # Setup tag templates
 - req: '80 02 00 01 04 00 82 00 94'
   res: '90 00'
@@ -32,9 +75,12 @@
 # Setup READ RECORD tag templates
 - req: '80 03 02 0C 06 00 57 5F 20 9F 1F'
   res: '90 00'
-- req: '80 03 01 14 06 9F 46 9F 47 9F 49'
+# 1984 bit certificates (248 bytes) have a record of their own to fit a READ RECORD response
+- req: '80 03 01 14 02 9F 46'
   res: '90 00'
-- req: '80 03 02 14 08 00 8F 9F 32 00 92 00 90'
+- req: '80 03 02 14 02 00 90'
+  res: '90 00'
+- req: '80 03 03 14 0C 00 8F 9F 32 00 92 9F 47 9F 48 9F 49'
   res: '90 00'
 - req: '80 03 01 1C 14 5F 24 00 5A 5F 34 9F 07 00 8E 9F 0D 9F 0E 9F 0F 5F 28 9F 4A'
   res: '90 00'
@@ -62,30 +108,37 @@
   res: '90 00'
 - req: '80 01 00 82 02 3C 00'
   res: '90 00'
-- req: '80 01 00 94 0C 08 02 02 00 10 01 02 00 18 01 02 01'
+# Application File Locator: SFI 1 record 2, SFI 2 records 1-3 and SFI 3 records 1-2. Both SFI 3 records are static data to be
+# authenticated, so the CDOL1, CDOL2, CVM List, Issuer Action Codes, Application Currency Code and Application Version Number are signed.
+- req: '80 01 00 94 0C 08 02 02 00 10 01 03 00 18 01 02 02'
   res: '90 00'
 # Track2
-- req: '80 01 00 57 0F 12 34 56 00 12 34 56 00 D1 81 12 20 09 99 9F'
+- req: '80 01 00 57 0F 12 34 56 00 12 34 56 08 D2 91 22 20 09 99 9F'
   res: '90 00'
-- req: '80 01 5F 20 1A 34 35 33 37 46 49 2F 56 45 53 41 45 4C 45 43 54 52 4F 4E 45 4C 4F 4B 33 31 36'
+- req: '80 01 5F 20 0F 43 41 52 44 48 4F 4C 44 45 52 2F 54 45 53 54'
   res: '90 00'
 - req: '80 01 9F 1F 18 31 32 32 39 34 30 30 30 30 30 32 30 30 30 30 32 34 39 30 30 30 30 30 30'
   res: '90 00'
-- req: '80 01 9F 46 B0 91 C0 3D C4 32 72 45 67 48 61 B3 29 C2 F2 E0 DA 63 69 68 6E CB F8 6A 20 1D A1 47 C5 2F 38 96 C3 4A 91 B6 67 85 6A D1 69 9C 6F 41 D8 80 CF 62 1C C2 46 F3 7A A3 67 71 81 BF BE 9B 97 F8 BE 98 F7 6F 83 2D 3C 5B 4E 2F B6 AC C0 A0 CF 11 D1 E3 28 99 82 37 96 1E B2 4D 27 B8 1D C6 99 DE 83 59 B1 07 48 EF 82 80 8D BD 51 5A 17 09 29 7B 51 D9 F2 3B B6 DB B7 56 80 54 4E 6A 8E 18 BE EF 2D 68 FB B5 9C B8 4E 77 3A FA C2 61 3A D1 66 16 20 F3 9C 10 5D 8D 66 C0 D2 D5 26 09 63 12 2D 9A FA 2B 90 8F FC FB 79 6B 3A 12 D3 CB 9A 8D 0E 4A 43 24 71'
+# ICC Public Key Certificate signed with iin_313233343536_e_3_private_key.pem, static data to be authenticated is
+# SFI 3 records 1-2 and the Application Interchange Profile (Static Data Authentication Tag List 9F4A)
+- req: '80 01 9F 46 F8 36 31 EC F2 92 69 69 5F A7 53 1C 7F 1A 85 CB 2E 73 CF 5E 0D BF D7 64 D2 01 8D 4C AA E5 AC CF 8F DC 31 77 57 D1 28 03 27 BC C9 09 D8 5D 62 B4 DA AB D0 4C E2 70 CA 85 14 90 2F 90 69 4A E6 73 B4 E0 3F 1C E3 54 AB B9 11 DD 16 1A E5 59 B4 3F 4F 56 4A 34 94 FC 1B F2 93 CB B2 B9 BC BF C2 02 18 B8 3A 04 03 9E F0 BF 8A 3B 03 28 45 9E 37 D6 F9 31 84 91 21 01 9B 38 81 C9 61 21 DC 72 17 24 C3 49 D1 BB 04 A1 B2 5A 91 DD AA 81 53 80 22 B3 CD 79 B5 5D 75 23 47 74 AF FF 57 56 11 C4 8B 9E B8 24 7C 9B EC 1F 2D 07 5B 32 27 0B B9 F9 0A B7 C3 93 63 8D 9D FD F1 BF 46 41 E7 3E F2 50 4A D9 9D E5 AD 74 21 40 1B 20 47 70 9F 46 89 CA B1 25 BE 52 C0 A2 C6 14 86 DD A8 3E A1 1A F9 42 4D 5D 93 AD 10 71 2F 12 F7 EA 4C 77 CA 0F 11 E0 7B CE 57 35 27 05 06 49 C8 28 96'
   res: '90 00'
 - req: '80 01 9F 47 01 03'
   res: '90 00'
+# ICC Public Key Remainder
+- req: '80 01 9F 48 2A 28 59 98 23 5F 68 D7 29 CC 0D E3 AF F4 1A 3E A5 D2 27 2C 92 88 C6 C4 71 49 26 D9 41 B0 4B 3C A1 D5 1F BE 29 C8 7D B6 A9 63 D1'
+  res: '90 00'
 - req: '80 01 9F 49 03 9F 37 04'
   res: '90 00'
-- req: '80 01 00 8F 01 92'
+- req: '80 01 00 8F 01 93'
   res: '90 00'
 - req: '80 01 9F 32 01 03'
   res: '90 00'
-- req: '80 01 00 92 24 5F CE A1 52 B4 D9 EC 97 91 BF 30 96 72 FA 51 AF A9 56 2D 1C 0B 33 3E D6 1A 5A 20 00 40 C3 B5 0A 46 02 3B 89'
+- req: '80 01 00 92 24 85 9D 66 8C 27 05 68 7E 10 22 98 C5 55 57 AF 68 84 C9 37 69 EB 52 65 2E AF 27 28 33 CE C2 8C 34 61 79 59 59'
   res: '90 00'
-- req: '80 01 00 90 B0 20 08 FB 40 DD A8 99 99 AF 87 3A 0D 9B AB 15 8D 5A CE 11 34 4F E3 8F 72 05 3C C5 EC CF E4 96 BB A5 8B 37 D6 69 BA B2 CE AF 93 7F 32 97 35 E0 27 41 E7 12 2C 83 2B E3 3C D1 AA 38 D2 7C DA CC ED 8B 02 F0 EA 23 1C 7C 6B CB F8 23 9E CF 2C 11 95 4B 40 7D 58 E9 A6 89 AB 22 DF C9 98 02 2A 17 9F AF C6 19 AB C5 AB 23 7C 68 41 02 39 12 93 95 57 5E 62 3F 4F 8B A8 38 0A 39 07 AC F4 20 09 B8 C3 D3 0F D1 0F BB 91 B1 3D C0 14 B6 19 BA 58 4C E0 B9 AC 6F B1 D3 A4 A7 45 03 F6 90 88 7F 11 13 13 D0 10 A3 A7 11 7E 8C 04 44 87 46 D3 AA F8 88 EA'
+- req: '80 01 00 90 F8 76 F9 3E 5B FA 43 20 20 48 68 78 E5 D3 20 A8 3F AF 2A B5 78 FB CB 4C BC E4 0D 87 E2 22 D2 B0 1F 0E AA 6B 8B BB C8 DD 3A DD 58 EC 6F 01 DC A9 CE 94 A5 49 84 CE 60 11 C8 23 A9 BC 98 8F 37 2D 6E 9F 1B 87 5F 6D AC 3E FA B6 8E FE D6 6D 22 5C 43 C7 59 20 A8 40 19 B2 94 8C 9F 21 20 64 E9 01 8A DF 97 10 57 32 7E ED EF 5C C9 41 A7 F4 55 67 03 3E 6F 1A 25 AC F3 EF 87 6A 91 08 F9 F5 2C EB 90 0E 77 2E A1 F7 59 7E 7B 56 7A 91 F6 19 8B 07 EB 67 CF E3 05 0E 08 95 71 73 F7 D6 9B 1B 26 F3 A0 7C 1A 6A F6 F5 2B 10 01 E2 50 56 E2 80 FD D7 21 2F 53 13 FF DB FB C1 80 C7 C6 C9 68 2D AB 52 77 7D 6B 48 D1 79 5A CC 27 98 98 A4 DC E7 AA 64 95 C2 00 06 02 09 D3 B7 F2 C7 CF DD D2 23 26 3B 7A 6B 45 BE 3B 7A 34 56 77 C3 6D 83 38 DE 5B ED A4 99 A4 55 30 32 E9 B7 B6'
   res: '90 00'
-- req: '80 01 5F 24 03 18 11 30'
+- req: '80 01 5F 24 03 29 12 31'
   res: '90 00'
 - req: '80 01 00 5A 08 12 34 56 00 12 34 56 08'
   res: '90 00'
@@ -117,11 +170,11 @@
   res: '90 00'
 - req: '80 01 00 A5 2E 50 0D 56 45 53 41 20 45 4C 45 43 54 52 4F 4E 5F 2D 02 65 6E 87 01 01 9F 12 10 56 45 53 41 20 20 20 20 20 20 20 20 20 20 20 20 9F 11 01 01'
   res: '90 00'
-- req: '80 01 9F 4B 80 44 6A DC 3F 29 DB D7 AD AE D0 7C AD 17 C0 03 6D C8 8D BD FB 6A 42 B1 BB 33 E0 C0 62 69 99 77 7D 87 EE 4B 18 EA D6 E8 75 38 58 AB 2D 3F 0C 89 1F 93 8D 22 05 27 B1 BD CC 65 29 51 FD 45 1D 62 44 50 50 8D D0 36 BB DD FE AE DE 3A 1D 56 A8 CA AC C8 69 B8 4B 95 8C 71 CA C5 A9 04 57 86 01 5F D1 DC D7 85 1A 0B 83 8C 65 85 C4 ED 92 6B 00 0A 24 B1 A4 04 74 86 56 2E 99 1B E6 00 11 4F F0 86 FA'
-  res: '90 00'
 - req: '80 01 9F 27 01 80'
   res: '90 00'
+# Static Application Cryptogram, used only when the Application Cryptogram Master Key is not set
 - req: '80 01 9F 26 08 B0 18 91 01 D1 14 16 C1'
   res: '90 00'
-- req: '80 01 9F 10 07 06 01 0A 03 A4 A0 02'
+# Issuer Application Data: length '06', Derivation Key Index '01', Cryptogram Version Number 18 ('12'), CVR '03 A4 A0 02'
+- req: '80 01 9F 10 07 06 01 12 03 A4 A0 02'
   res: '90 00'

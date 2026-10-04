@@ -35,6 +35,19 @@ public class ApduLog {
     }
 
     /**
+     * Add APDU command log entry. Simulator setup commands are not logged.
+     */
+    public static void addCommandLogEntry(byte[] src, short srcOffset, byte length) {
+        // Logical channel bits of CLA are ignored
+        short cmd = (short) (Util.getShort(src, srcOffset) & (short) 0xFCFF);
+        if (EmvApplet.isSetupCommand(cmd)) {
+            return;
+        }
+
+        addLogEntry(src, srcOffset, length);
+    }
+
+    /**
      * Add APDU log entry.
      */
     public static void addLogEntry(short responseTrailer) {
@@ -47,11 +60,6 @@ public class ApduLog {
      */
     public static void addLogEntry(byte[] src, short srcOffset, byte length) {
         if (maxCount == (short) 0) {
-            return;
-        }
-
-        if (src[srcOffset] == (byte) 0x80) {
-            // do not log internal commands
             return;
         }
 
