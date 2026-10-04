@@ -154,9 +154,13 @@ fn init_logging() {
     });
 }
 
+// APDU script entry, see lib/src/main/java/emvcardsimulator/api/ApduScript.java
 #[derive(Serialize, Deserialize, Clone)]
 struct ApduRequestResponse {
+    // Empty in a card_information entry, which describes the card and is not sent to the card
+    #[serde(default)]
     req: String,
+    #[serde(default)]
     res: String,
 }
 
@@ -169,7 +173,7 @@ impl ApduRequestResponse {
         // Setup the app ICC data
         let card_setup_data: Vec<ApduRequestResponse> =
             serde_yaml::from_str(&fs::read_to_string(setup_file).unwrap()).unwrap();
-        for apdu in card_setup_data {
+        for apdu in card_setup_data.into_iter().filter(|apdu| !apdu.req.is_empty()) {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let response = ApduRequestResponse::to_raw_vec(&apdu.res);
 

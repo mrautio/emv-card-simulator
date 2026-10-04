@@ -106,6 +106,23 @@ public class EmvCardTest {
     }
 
     @Test
+    public void cardInformation() throws Exception {
+        ApduScript script = ApduScript.parse("# Card\n"
+            + "- card_information:\n"
+            + "    title: 'Card #1 ''test''' # comment\n"
+            + "    issuer: \"Test bank\"\n"
+            + "- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'\n"
+            + "  res: '90 00'\n"
+            + "- card_information:\n"
+            + "    title: second\n");
+
+        assertEquals("Card #1 'test'", script.cardInformation().get("title"));
+        assertEquals("Test bank", script.cardInformation().get("issuer"));
+        assertEquals(1, script.commands().size());
+        assertTrue(ApduScript.bundled("card_setup_app_apdus.yaml").cardInformation().isEmpty());
+    }
+
+    @Test
     public void unexpectedResponseFails() throws Exception {
         ApduScript script = ApduScript.parse("- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'\n  res: '6A 82' # comment\n");
         assertThrows(ScriptException.class, () -> new EmvCard(EmvCard.PROTOCOL_CONTACTLESS).personalize(script));
@@ -116,5 +133,7 @@ public class EmvCardTest {
         assertThrows(ScriptException.class, () -> ApduScript.parse("- req: [0x00]\n  res: '90 00'"));
         assertThrows(ScriptException.class, () -> ApduScript.parse("- req: '00 A4 0'\n  res: '90 00'"));
         assertThrows(ScriptException.class, () -> ApduScript.parse("- req: '00 A4 04 00'"));
+        assertThrows(ScriptException.class, () -> ApduScript.parse("- title: 'Card'"));
+        assertThrows(ScriptException.class, () -> ApduScript.parse("- card_information: 'Card'"));
     }
 }

@@ -15,6 +15,13 @@ import java.util.regex.Pattern;
 
 /**
  * APDU script in the cardtool YAML format, i.e. a list of {@code req} command and {@code res} status word hex strings.
+ * An optional {@code card_information} entry describes the card and is not sent to the card:
+ * <pre>
+ * - card_information:
+ *     title: 'Test card'
+ * - req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
+ *   res: '90 00'
+ * </pre>
  */
 public final class ApduScript {
 
@@ -40,7 +47,9 @@ public final class ApduScript {
         "test/card_log_consume_apdus.yaml"
     ));
 
-    private static final Pattern ENTRY = Pattern.compile("^\\s*(-\\s*)?(req|res)\\s*:\\s*['\"]?([0-9A-Fa-f\\s]*)['\"]?\\s*$");
+    private static final Pattern ENTRY = Pattern.compile("^\\s*(-\\s*)?(\\w+)\\s*:\\s*(.*?)\\s*$");
+
+    private static final String CARD_INFORMATION = "card_information";
 
     private static final short CMD_SET_EMV_TAG = (short) 0x8001;
 
@@ -58,9 +67,11 @@ public final class ApduScript {
     }
 
     private final List<Command> commands;
+    private final Map<String, String> cardInformation;
 
-    private ApduScript(List<Command> commands) {
+    private ApduScript(List<Command> commands, Map<String, String> cardInformation) {
         this.commands = Collections.unmodifiableList(commands);
+        this.cardInformation = Collections.unmodifiableMap(cardInformation);
     }
 
     public List<Command> commands() {
@@ -68,16 +79,25 @@ public final class ApduScript {
     }
 
     /**
+     * Values of the card_information entry, e.g. {@code title}. With several entries the first value of a key is kept.
+     */
+    public Map<String, String> cardInformation() {
+        return cardInformation;
+    }
+
+    /**
      * Parse script from YAML text.
      */
     public static ApduScript parse(String yaml) throws ScriptException {
         List<Command> commands = new ArrayList<>();
+        Map<String, String> cardInformation = new LinkedHashMap<>();
         byte[] request = null;
         byte[] response = null;
+        boolean inCardInformation = false;
         String[] lines = yaml.split("\r?\n", -1);
 
         for (int i = 0; i < lines.length; i++) {
-            String line = lines[i].replaceFirst("#.*", "");
+            String line = stripComment(lines[i]);
             if (line.trim().isEmpty()) {
                 continue;
             }
@@ -87,19 +107,31 @@ public final class ApduScript {
                 throw new ScriptException("Line " + (i + 1) + ": unsupported syntax: " + lines[i].trim());
             }
 
+            String key = entry.group(2);
+            String value = unquote(entry.group(3));
             if (entry.group(1) != null) {
                 if (request != null || response != null) {
                     commands.add(command(request, response, i));
                 }
                 request = null;
                 response = null;
+                inCardInformation = CARD_INFORMATION.equals(key) && value.isEmpty();
+                if (inCardInformation) {
+                    continue;
+                }
+            } else if (inCardInformation) {
+                if (!cardInformation.containsKey(key)) {
+                    cardInformation.put(key, value);
+                }
+                continue;
             }
 
-            byte[] value = decodeHex(entry.group(3), i);
-            if ("req".equals(entry.group(2))) {
-                request = value;
+            if ("req".equals(key)) {
+                request = decodeHex(value, i);
+            } else if ("res".equals(key)) {
+                response = decodeHex(value, i);
             } else {
-                response = value;
+                throw new ScriptException("Line " + (i + 1) + ": unsupported key: " + key);
             }
         }
 
@@ -107,7 +139,7 @@ public final class ApduScript {
             commands.add(command(request, response, lines.length));
         }
 
-        return new ApduScript(commands);
+        return new ApduScript(commands, cardInformation);
     }
 
     /**
@@ -157,10 +189,35 @@ public final class ApduScript {
         return new Command(request, response);
     }
 
+    private static String stripComment(String line) {
+        char quote = 0;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (quote != 0) {
+                quote = (c == quote) ? 0 : quote;
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (c == '#' && (i == 0 || Character.isWhitespace(line.charAt(i - 1)))) {
+                return line.substring(0, i);
+            }
+        }
+        return line;
+    }
+
+    private static String unquote(String value) {
+        if (value.length() >= 2 && value.charAt(0) == '\'' && value.endsWith("'")) {
+            return value.substring(1, value.length() - 1).replace("''", "'");
+        }
+        if (value.length() >= 2 && value.charAt(0) == '"' && value.endsWith("\"")) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
     private static byte[] decodeHex(String hex, int line) throws ScriptException {
         String digits = hex.replaceAll("\\s", "");
-        if (digits.length() % 2 != 0) {
-            throw new ScriptException("Line " + (line + 1) + ": odd number of hex digits");
+        if (!digits.matches("([0-9A-Fa-f]{2})*")) {
+            throw new ScriptException("Line " + (line + 1) + ": not hex bytes: " + hex);
         }
 
         byte[] result = new byte[digits.length() / 2];
