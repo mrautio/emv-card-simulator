@@ -54,6 +54,15 @@ card.personalize(ApduScript.bundled("card_setup_app_apdus.yaml"));
 byte[] response = card.transmit(commandApdu);
 ```
 
+A script may describe the card in a `card_information` entry, it is not sent to the card and the other tools skip it:
+
+```yaml
+- card_information:
+    title: 'Test card'
+- req: '00 A4 04 00 07 AF FF FF FF FF 12 34'
+  res: '90 00'
+```
+
 Applets are installed when a script selects them. The APDU scripts of `src/main/rust/config` are bundled, and the ones of
 `src/test/java/config` with a `test/` prefix, e.g. `test/card_setup_app_visa_contactless_apdus.yaml`.
 

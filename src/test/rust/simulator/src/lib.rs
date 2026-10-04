@@ -109,9 +109,13 @@ impl Drop for LoggingSuppressed {
     }
 }
 
+// APDU script entry, see lib/src/main/java/emvcardsimulator/api/ApduScript.java
 #[derive(Deserialize, Clone)]
 struct ApduRequestResponse {
+    // Empty in a card_information entry, which describes the card and is not sent to the card
+    #[serde(default)]
     req: String,
+    #[serde(default)]
     res: String,
 }
 
@@ -128,7 +132,7 @@ impl ApduRequestResponse {
         // Personalization APDUs carry keys and other sensitive card data, keep them out of the logs
         let _logging_suppressed = LoggingSuppressed::new();
 
-        for apdu in card_setup_data {
+        for apdu in card_setup_data.into_iter().filter(|apdu| !apdu.req.is_empty()) {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let response = ApduRequestResponse::to_raw_vec(&apdu.res);
 
@@ -894,7 +898,7 @@ impl PrivateCard {
             cdol1: None,
         };
         let mut pin = String::from("1234");
-        for apdu in setup {
+        for apdu in setup.into_iter().filter(|apdu| !apdu.req.is_empty()) {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let data = &request[5..];
             if request.starts_with(b"\x00\xA4\x04\x00") {
