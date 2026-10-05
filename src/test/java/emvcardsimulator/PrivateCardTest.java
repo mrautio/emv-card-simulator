@@ -68,16 +68,36 @@ public class PrivateCardTest {
         List<DynamicTest> tests = new ArrayList<>();
         for (Path card : cards) {
             String name = CARDS.relativize(card).toString();
-            tests.add(DynamicTest.dynamicTest(name + " contact", () -> {
-                install(card, SmartCard.PROTOCOL_T1);
-                contactEntryPoint(this, card.toString());
-            }));
-            tests.add(DynamicTest.dynamicTest(name + " contactless", () -> {
-                install(card, SmartCard.PROTOCOL_CONTACTLESS);
-                contactlessEntryPoint(this, card.toString());
-            }));
+            Set<String> interfaces = cardInterfaces(card);
+            if (interfaces.contains("contact")) {
+                tests.add(DynamicTest.dynamicTest(name + " contact", () -> {
+                    install(card, SmartCard.PROTOCOL_T1);
+                    contactEntryPoint(this, card.toString());
+                }));
+            }
+            if (interfaces.contains("contactless")) {
+                tests.add(DynamicTest.dynamicTest(name + " contactless", () -> {
+                    install(card, SmartCard.PROTOCOL_CONTACTLESS);
+                    contactlessEntryPoint(this, card.toString());
+                }));
+            }
         }
         return tests.stream();
+    }
+
+    /**
+     * Interfaces of the card, 'interfaces' of the card_information entry of the setup file, e.g. 'contactless' for a contactless
+     * only card. Without it the card is tested on both interfaces.
+     */
+    private static Set<String> cardInterfaces(Path card) throws IOException {
+        for (String line : Files.readAllLines(card, StandardCharsets.UTF_8)) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("interfaces:")) {
+                String value = trimmed.substring("interfaces:".length()).replaceAll("['\" ]", "");
+                return new LinkedHashSet<>(Arrays.asList(value.split(",")));
+            }
+        }
+        return new LinkedHashSet<>(Arrays.asList("contact", "contactless"));
     }
 
     /**
