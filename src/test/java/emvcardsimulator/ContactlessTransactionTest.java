@@ -154,6 +154,30 @@ public class ContactlessTransactionTest {
         assertArrayEquals(hash, Arrays.copyOfRange(recovered, length - 21, length - 1));
     }
 
+    /**
+     * fDDA with Card Authentication Related Data in a record personalized as is: the terminal reads the 9F69 that the card generated
+     * and signed in GET PROCESSING OPTIONS, the personalized value is a placeholder. Other record data and padding are kept.
+     */
+    @Test
+    public void fastDynamicDataAuthenticationRecordTest() throws CardException, GeneralSecurityException {
+        // Random disabled, Card Unpredictable Number is 'AB AB AB AB'
+        enableQvsdc("00 06", "82 94 57 9F 10 9F 26 9F 27 9F 36 9F 4B 9F 6C");
+        // SFI 3 record 1: PAN, placeholder of a shorter length and padding
+        String record = "70 0F 5A 03 12 34 56 9F 69 05 01 00 00 00 00 00 FF";
+        assertSw(0x9000, send("80 04 01 1C 11 " + record));
+
+        assertSw(0x9000, send(SELECT));
+        assertArrayEquals(hex(record + " 90 00"), send("00 B2 01 1C 00").getBytes());
+
+        ResponseAPDU response = qvsdcTransaction(TTQ_ONLINE_CRYPTOGRAM_REQUIRED);
+        assertArrayEquals(hex("70 11 5A 03 12 34 56 9F 69 07 01 AB AB AB AB 80 00 00 FF 90 00"), send("00 B2 01 1C 00").getBytes());
+
+        byte[] recovered = EmvTestUtil.recoverSignedData(iccModulus, findTag(response.getData(), 0x9F4B));
+        int length = recovered.length;
+        byte[] hash = sha1(Arrays.copyOfRange(recovered, 1, length - 21), hex("01 23 45 67 000000000001 0978"), hex("01 AB AB AB AB 80 00"));
+        assertArrayEquals(hash, Arrays.copyOfRange(recovered, length - 21, length - 1));
+    }
+
     private static byte[] cvc3(String initializationVector, String unpredictableNumber, String atc) throws GeneralSecurityException {
         byte[] result = des(Cipher.ENCRYPT_MODE, hex(CVC3_KEY), hex(initializationVector + unpredictableNumber + atc));
         return Arrays.copyOfRange(result, 6, 8);

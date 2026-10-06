@@ -825,6 +825,68 @@ public abstract class EmvApplet extends Applet {
         return readRecord.expandTlvToArray(dst, dstOffset);
     }
 
+    /**
+     * READ RECORD response of a record set as is: the record template '70' as personalized, except the primitive data objects of
+     * the template that the card has generated have their current value, e.g. Card Authentication Related Data (9F69) of fDDA that
+     * is signed in GET PROCESSING OPTIONS and read by the terminal from the record. Padding and other data objects are kept as is.
+     */
+    private short copyRawRecord(ReadRecord readRecord, byte[] dst) {
+        final short end = readRecord.copyDataToArray(tmpBuffer, (short) 0);
+
+        // Record template is validated when personalized: '70' || length (one byte or '81' || one byte) || data objects
+        short offset = (tmpBuffer[1] == (byte) 0x81) ? (short) 3 : (short) 2;
+
+        // Data objects are written after room for the longest template header, '70' '82' || two byte length
+        final short valueOffset = (short) 4;
+        short dstOffset = valueOffset;
+        while (offset < end) {
+            if (tmpBuffer[offset] == (byte) 0x00 || tmpBuffer[offset] == (byte) 0xFF) {
+                dst[dstOffset] = tmpBuffer[offset];
+                dstOffset++;
+                offset++;
+                continue;
+            }
+
+            final short tagOffset = offset;
+            offset += EmvTag.tagEntryLength(tmpBuffer, offset);
+            short valueLength = (short) (tmpBuffer[offset] & 0x00FF);
+            offset++;
+            if (valueLength == (short) 0x81) {
+                valueLength = (short) (tmpBuffer[offset] & 0x00FF);
+                offset++;
+            }
+            offset += valueLength;
+
+            EmvTag tag = null;
+            if (!EmvTag.isConstructed(tmpBuffer, tagOffset)) {
+                tag = EmvTag.findTag(tmpBuffer, tagOffset);
+            }
+            if (tag != null && tag.isGenerated()) {
+                dstOffset = tag.copyToArray(dst, dstOffset);
+            } else {
+                dstOffset = Util.arrayCopyNonAtomic(tmpBuffer, tagOffset, dst, dstOffset, (short) (offset - tagOffset));
+            }
+        }
+
+        short length = (short) (dstOffset - valueOffset);
+        short headerOffset;
+        if (length < (short) 0x80) {
+            headerOffset = (short) (valueOffset - 2);
+            dst[(short) (headerOffset + 1)] = (byte) length;
+        } else if (length <= (short) 0xFF) {
+            headerOffset = (short) (valueOffset - 3);
+            dst[(short) (headerOffset + 1)] = (byte) 0x81;
+            dst[(short) (headerOffset + 2)] = (byte) length;
+        } else {
+            headerOffset = (short) 0;
+            dst[1] = (byte) 0x82;
+            Util.setShort(dst, (short) 2, length);
+        }
+        dst[headerOffset] = (byte) 0x70;
+
+        return Util.arrayCopyNonAtomic(dst, headerOffset, dst, (short) 0, (short) (dstOffset - headerOffset));
+    }
+
     protected void processReadRecord(APDU apdu, byte[] buf) {
         short p1p2 = Util.getShort(buf, ISO7816.OFFSET_P1);
 
@@ -842,7 +904,7 @@ public abstract class EmvApplet extends Applet {
 
         short dataLength;
         if (readRecord.isRaw()) {
-            dataLength = readRecord.copyDataToArray(responseBuffer, (short) 0);
+            dataLength = copyRawRecord(readRecord, responseBuffer);
         } else {
             short tag70Length = expandReadRecord(readRecord, tmpBuffer, (short) 0);
 

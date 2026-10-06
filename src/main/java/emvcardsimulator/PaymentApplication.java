@@ -394,6 +394,11 @@ public class PaymentApplication extends EmvApplet {
                 return KeyBuilder.LENGTH_RSA_1984;
             default:
                 // Other EMV ICC key lengths, e.g. 1152 and 1408 bits, are not KeyBuilder constants but many cards and JCardSim build them
+                // ICC key length is not limited to the KeyBuilder constants (EMV Book 2, 6.1), e.g. 1408 bits. Support of other
+                // lengths is card dependent, KeyBuilder.buildKey throws CryptoException.ILLEGAL_VALUE without it
+                if (byteSize <= (short) 0 || byteSize > (short) 248) {
+                    throw new CryptoException(CryptoException.ILLEGAL_USE);
+                }
                 return (short) (byteSize * 8);
         }
     }
@@ -576,15 +581,16 @@ public class PaymentApplication extends EmvApplet {
             EmvApplet.logAndThrow(SW_SELECTED_FILE_INVALIDATED);
         }
 
-        // Check if PAN (tag 5A) exists in the ICC
-        if (EmvTag.findTag((short) 0x5A) != null) {
+        // Check if DF Name (tag 84) exists in the ICC, an application may have no Application PAN (tag 5A), e.g. qVSDC online
+        // only with Track 2 Equivalent Data
+        if (EmvTag.findTag((short) 0x84) != null) {
             expandFciTemplate(tagBf0cFci, (short) 0xBF0C);
             expandFciTemplate(tagA5Fci, (short) 0xA5);
             expandFciTemplate(tag6fFci, (short) 0x6F);
 
             sendResponse(apdu, buf, (short) 0x6F);
         } else {
-            // NO PAN, we're probably in the setup phase
+            // No DF Name, we're probably in the setup phase
             EmvApplet.logAndThrow(ISO7816.SW_NO_ERROR);
         }
     }
