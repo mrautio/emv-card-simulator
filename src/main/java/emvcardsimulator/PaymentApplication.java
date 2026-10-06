@@ -5,7 +5,6 @@ import javacard.framework.ISO7816;
 import javacard.framework.ISOException;
 import javacard.framework.JCSystem;
 import javacard.framework.Util;
-import javacard.security.CryptoException;
 import javacard.security.DESKey;
 import javacard.security.KeyBuilder;
 import javacard.security.MessageDigest;
@@ -394,7 +393,8 @@ public class PaymentApplication extends EmvApplet {
             case (short) 1984:
                 return KeyBuilder.LENGTH_RSA_1984;
             default:
-                throw new CryptoException(CryptoException.ILLEGAL_USE);
+                // Other EMV ICC key lengths, e.g. 1152 and 1408 bits, are not KeyBuilder constants but many cards and JCardSim build them
+                return (short) (byteSize * 8);
         }
     }
 
