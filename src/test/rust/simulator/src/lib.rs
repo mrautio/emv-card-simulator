@@ -877,12 +877,15 @@ const PPSE_AID: &[u8] = b"2PAY.SYS.DDF01";
 const PSE_AID: &[u8] = b"1PAY.SYS.DDF01";
 
 /// What the terminal, the issuer and the cardholder know of a private test card, from its setup file: application AIDs
-/// (the terminal list of AIDs), ICC Application Cryptogram Master Key and CDOL1 (issuer) and PIN (cardholder)
+/// (the terminal list of AIDs), ICC Application Cryptogram Master Key and CDOL1 (issuer) and PIN (cardholder) of the selected
+/// application
 struct PrivateCard {
     file: String,
     applications: Vec<Vec<u8>>,
     master_key: Option<Vec<u8>>,
     cdol1: Option<Vec<u8>>,
+    // Master key, CDOL1 and PIN of each application, of the SELECT command before them in the setup file
+    application_data: Vec<(Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>, Option<String>)>,
 }
 
 impl PrivateCard {
@@ -896,27 +899,43 @@ impl PrivateCard {
             applications: Vec::new(),
             master_key: None,
             cdol1: None,
+            application_data: Vec::new(),
         };
-        let mut pin = String::from("1234");
         for apdu in setup.into_iter().filter(|apdu| !apdu.req.is_empty()) {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let data = &request[5..];
             if request.starts_with(b"\x00\xA4\x04\x00") {
                 let aid = data.to_vec();
                 if aid != PPSE_AID && aid != PSE_AID && !card.applications.contains(&aid) {
-                    card.applications.push(aid);
+                    card.applications.push(aid.clone());
                 }
-            } else if request.starts_with(b"\x80\x00\x00\x07\x10") && card.master_key.is_none() {
-                card.master_key = Some(data.to_vec());
-            } else if request.starts_with(b"\x80\x00\x00\x01") {
-                pin = hex::encode_upper(data).trim_end_matches('F').to_string();
-            } else if request.starts_with(b"\x80\x04") && card.cdol1.is_none() {
-                card.cdol1 = find_data_object(data, &[0x8C]);
+                card.application_data.push((aid, None, None, None));
+            } else if let Some((_, master_key, cdol1, pin)) = card.application_data.last_mut() {
+                if request.starts_with(b"\x80\x00\x00\x07\x10") && master_key.is_none() {
+                    *master_key = Some(data.to_vec());
+                } else if request.starts_with(b"\x80\x00\x00\x01") {
+                    *pin = Some(hex::encode_upper(data).trim_end_matches('F').to_string());
+                } else if request.starts_with(b"\x80\x04") && cdol1.is_none() {
+                    *cdol1 = find_data_object(data, &[0x8C]);
+                }
             }
         }
-        *PRIVATE_CARD_PIN.lock().unwrap() = pin;
+        // Before the application selection the PIN is of the first application with one
+        card.select(&[]);
 
         card
+    }
+
+    /// Master key, CDOL1 and PIN of the selected application, the first ones of the card when the application has none
+    fn select(&mut self, aid: &[u8]) {
+        let selected: Vec<_> = self.application_data.iter().filter(|(a, ..)| a == aid).collect();
+        let first_master_key = self.application_data.iter().find_map(|(_, m, ..)| m.clone());
+        let first_cdol1 = self.application_data.iter().find_map(|(_, _, c, _)| c.clone());
+        let first_pin = self.application_data.iter().find_map(|(.., p)| p.clone());
+        self.master_key = selected.iter().find_map(|(_, m, ..)| m.clone()).or(first_master_key);
+        self.cdol1 = selected.iter().find_map(|(_, _, c, _)| c.clone()).or(first_cdol1);
+        let pin = selected.iter().find_map(|(.., p)| p.clone()).or(first_pin);
+        *PRIVATE_CARD_PIN.lock().unwrap() = pin.unwrap_or_else(|| String::from("1234"));
     }
 }
 
@@ -1002,7 +1021,11 @@ fn cryptogram_name(cryptogram_type: CryptogramType) -> &'static str {
 /// Issuer verification of the ARQC when the card has Visa Cryptogram Version Number 18 ('06' || DKI || '12' || CVR in Issuer
 /// Application Data), returns a description of the result
 fn verify_private_card_arqc(connection: &EmvConnection, card: &PrivateCard) -> String {
-    let issuer_application_data = connection.get_tag_value("9F10").unwrap().clone();
+    // Issuer Application Data is optional in the GENERATE AC response (EMV Book 3, 6.5.5.4)
+    let issuer_application_data = match connection.get_tag_value("9F10") {
+        Some(data) => data.clone(),
+        None => return "ARQC not verified, no Issuer Application Data".to_string(),
+    };
     let master_key = match &card.master_key {
         Some(key) => key,
         None => return "ARQC not verified, no ICC Application Cryptogram Master Key".to_string(),
@@ -1152,7 +1175,7 @@ fn private_card_tvr(connection: &EmvConnection) -> String {
 /// AIDs (EMV Book 1, 12.3.3), the terminal list is the AIDs of the card. The application with the highest priority is selected
 /// (EMV Book 1, 12.4). An ARQC is authorised online and completed with the second GENERATE AC.
 fn private_card_contact_transaction(connection: &mut EmvConnection) {
-    let card = PrivateCard::load();
+    let mut card = PrivateCard::load();
     setup_connection(connection).unwrap();
     connection.pin_callback = Some(&private_card_pin_entry);
 
@@ -1188,6 +1211,7 @@ fn private_card_contact_transaction(connection: &mut EmvConnection) {
     assert!(!candidates.is_empty(), "No application to select");
     candidates.sort_by_key(|(order, _)| *order);
     let application = candidates[0].1.clone();
+    card.select(&application.aid);
 
     connection.handle_select_payment_application(&application).unwrap();
     connection.start_transaction(&application).expect("Transaction start");
@@ -1224,7 +1248,7 @@ fn private_card_contact_transaction(connection: &mut EmvConnection) {
 /// Contactless transaction of a private test card: PPSE, qVSDC (EMV Contactless Book C-3) with the cryptogram in the GET PROCESSING
 /// OPTIONS response, ARQC is verified by the issuer.
 fn private_card_contactless_transaction(connection: &mut EmvConnection) {
-    let card = PrivateCard::load();
+    let mut card = PrivateCard::load();
     setup_connection(connection).unwrap();
     connection.contactless = true;
     connection.pin_callback = Some(&private_card_pin_entry);
@@ -1236,6 +1260,7 @@ fn private_card_contactless_transaction(connection: &mut EmvConnection) {
         .handle_select_payment_system_environment()
         .expect("PPSE");
     let application = applications[0].clone();
+    card.select(&application.aid);
 
     connection.handle_select_payment_application(&application).unwrap();
     connection.start_transaction(&application).expect("Transaction start");
