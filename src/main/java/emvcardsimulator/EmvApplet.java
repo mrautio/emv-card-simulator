@@ -42,13 +42,13 @@ public abstract class EmvApplet extends Applet {
 
     protected static final short CMD_SET_SETTINGS              = (short) 0x8000;
     protected static final short CMD_SET_EMV_TAG               = (short) 0x8001;
-    protected static final short CMD_SET_EMV_TAG_FUZZ          = (short) 0x8011;
+    protected static final short CMD_SET_FAULT                 = (short) 0x8011;
     protected static final short CMD_SET_TAG_TEMPLATE          = (short) 0x8002;
     protected static final short CMD_SET_READ_RECORD_TEMPLATE  = (short) 0x8003;
     protected static final short CMD_SET_READ_RECORD_DATA      = (short) 0x8004;
     protected static final short CMD_FACTORY_RESET             = (short) 0x8005;
     protected static final short CMD_LOG_CONSUME               = (short) 0x8006;
-    protected static final short CMD_FUZZ_RESET                = (short) 0x8007;
+    protected static final short CMD_FAULT_RESET               = (short) 0x8007;
     protected static final short CMD_SELECT = (short) 0x00A4;
     protected static final short CMD_READ_RECORD = (short) 0x00B2;
     protected static final short CMD_GET_RESPONSE = (short) 0x00C0;
@@ -98,6 +98,8 @@ public abstract class EmvApplet extends Applet {
     private static final short RESPONSE_TEMPLATE_HEADER_LENGTH = (short) 4;
     private static final short PENDING_RESPONSE_OFFSET = (short) 0;
     private static final short PENDING_RESPONSE_LENGTH = (short) 1;
+    // READ RECORD template in right aligned three byte form
+    private static final byte[] TAG_70 = { (byte) 0x00, (byte) 0x00, (byte) 0x70 };
 
     // Shared by the applets of the package like tmpBuffer, only one of them is selected at a time
     protected static byte[] responseBuffer;
@@ -142,7 +144,6 @@ public abstract class EmvApplet extends Applet {
     protected short responseTemplateTag;
 
     private static final byte[] DEFAULT_FCI_TEMPLATE = { (byte) 0x00, (byte) 0x84, (byte) 0x00, (byte) 0xA5 };
-    protected boolean randomResponseSuffixData;
 
     /**
      * Process simulator setup commands. Returns true if the command was a setup command.
@@ -155,8 +156,8 @@ public abstract class EmvApplet extends Applet {
             case CMD_SET_EMV_TAG:
                 processSetEmvTag(apdu, buf, receiveData(apdu, buf));
                 return true;
-            case CMD_SET_EMV_TAG_FUZZ:
-                processSetEmvTagFuzz(apdu, buf, receiveData(apdu, buf));
+            case CMD_SET_FAULT:
+                processSetFault(apdu, buf, receiveData(apdu, buf));
                 return true;
             case CMD_SET_TAG_TEMPLATE:
                 processSetTagTemplate(apdu, buf, receiveData(apdu, buf));
@@ -170,8 +171,8 @@ public abstract class EmvApplet extends Applet {
             case CMD_FACTORY_RESET:
                 factoryReset(apdu, buf);
                 return true;
-            case CMD_FUZZ_RESET:
-                fuzzReset(apdu, buf);
+            case CMD_FAULT_RESET:
+                faultReset(apdu, buf, receiveData(apdu, buf));
                 return true;
             case CMD_LOG_CONSUME:
                 consumeLogs(apdu, buf);
@@ -188,12 +189,12 @@ public abstract class EmvApplet extends Applet {
         switch (cmd) {
             case CMD_SET_SETTINGS:
             case CMD_SET_EMV_TAG:
-            case CMD_SET_EMV_TAG_FUZZ:
+            case CMD_SET_FAULT:
             case CMD_SET_TAG_TEMPLATE:
             case CMD_SET_READ_RECORD_TEMPLATE:
             case CMD_SET_READ_RECORD_DATA:
             case CMD_FACTORY_RESET:
-            case CMD_FUZZ_RESET:
+            case CMD_FAULT_RESET:
             case CMD_LOG_CONSUME:
                 return true;
             default:
@@ -330,7 +331,7 @@ public abstract class EmvApplet extends Applet {
             expectedLength = (short) 256;
         }
         if (expectedLength != 0 && expectedLength != responseLength) {
-            EmvApplet.logAndThrow((short) (ISO7816.SW_CORRECT_LENGTH_00 | (responseLength & 0x00FF)));
+            EmvApplet.logAndThrow(correctLengthStatus(responseLength));
         }
     }
 
@@ -410,27 +411,107 @@ public abstract class EmvApplet extends Applet {
             return;
         }
 
-        // Blocked card responds to all commands, including SELECT, with 'Function not supported'
-        if (cardBlocked) {
-            EmvApplet.logAndThrow(ISO7816.SW_FUNC_NOT_SUPPORTED);
+        // GET RESPONSE keeps the faults of the command whose response it returns
+        if (cmd != CMD_GET_RESPONSE) {
+            Fault.evaluate(buf[ISO7816.OFFSET_INS], EmvTag.contactless);
+        }
+        Fault.delay();
+
+        Fault statusWordFault = Fault.findActive(Fault.KIND_STATUS_WORD);
+        if (statusWordFault != null && !statusWordFault.isResponseDataKept() && cmd != CMD_GET_RESPONSE) {
+            // Command is not processed
+            short statusWord = statusWordFault.getStatusWord();
+            if (statusWord != ISO7816.SW_NO_ERROR) {
+                EmvApplet.logAndThrow(statusWord);
+            }
+            return;
         }
 
-        if (cmd == CMD_SELECT) {
-            checkSelect(buf);
-            processSelect(apdu, buf);
-        } else if (selectingApplet()) {
-            return;
-        } else if (cmd == CMD_GET_RESPONSE) {
-            processGetResponse(apdu, buf);
-        } else {
-            processCommand(apdu, buf, cmd, dataLength);
+        short statusWord = ISO7816.SW_NO_ERROR;
+        try {
+            // Blocked card responds to all commands, including SELECT, with 'Function not supported'
+            if (cardBlocked) {
+                EmvApplet.logAndThrow(ISO7816.SW_FUNC_NOT_SUPPORTED);
+            }
+
+            if (cmd == CMD_SELECT) {
+                checkSelect(buf);
+                processSelect(apdu, buf);
+            } else if (selectingApplet()) {
+                return;
+            } else if (cmd == CMD_GET_RESPONSE) {
+                processGetResponse(apdu, buf);
+            } else {
+                processCommand(apdu, buf, cmd, dataLength);
+            }
+        } catch (ISOException e) {
+            statusWord = e.getReason();
         }
 
         // Status of a response sent in parts is set after the command processing has completed
         short remaining = pendingResponse[PENDING_RESPONSE_LENGTH];
-        if (remaining > (short) 0) {
-            EmvApplet.logAndThrow((short) (ISO7816.SW_BYTES_REMAINING_00 | (remaining > (short) 0x00FF ? (short) 0 : remaining)));
+        if (statusWord == ISO7816.SW_NO_ERROR && remaining > (short) 0) {
+            EmvApplet.logAndThrow(bytesRemainingStatus(remaining));
         }
+
+        // '6Cxx' of the transport is faulted with response chain faults
+        if (statusWordFault != null && statusWordFault.getStatusWord() != statusWord
+            && (short) (statusWord & (short) 0xFF00) != ISO7816.SW_CORRECT_LENGTH_00) {
+            statusWord = replaceStatusWord(statusWord, statusWordFault.getStatusWord());
+        }
+        if (statusWord != ISO7816.SW_NO_ERROR) {
+            ISOException.throwIt(statusWord);
+        }
+    }
+
+    /**
+     * Replace status word of the response, the logged status word is replaced as well.
+     */
+    private static short replaceStatusWord(short statusWord, short newStatusWord) {
+        ApduLog last = ApduLog.tail;
+        if (statusWord != ISO7816.SW_NO_ERROR && last != null && last.getLength() == (byte) 2
+            && Util.getShort(last.getData(), (short) 0) == statusWord) {
+            ApduLog.removeLog(last);
+        }
+        if (newStatusWord != ISO7816.SW_NO_ERROR) {
+            ApduLog.addLogEntry(newStatusWord);
+        }
+        return newStatusWord;
+    }
+
+    /**
+     * Status '61xx' of a response sent in parts, xx is the length of the next part or '00' if over 255.
+     */
+    private short bytesRemainingStatus(short remaining) {
+        Fault wrongRemaining = Fault.findActiveChain(Fault.CHAIN_WRONG_REMAINING);
+        if (wrongRemaining != null) {
+            return (short) (ISO7816.SW_BYTES_REMAINING_00 | (wrongRemaining.getParameter((short) 1) & 0x00FF));
+        }
+
+        short partLength = maxResponsePartLength();
+        if (remaining > partLength) {
+            remaining = (partLength == MAX_RESPONSE_PART_LENGTH) ? (short) 0 : partLength;
+        }
+        return (short) (ISO7816.SW_BYTES_REMAINING_00 | remaining);
+    }
+
+    /**
+     * Maximum length of a response part, shorter if a fault forces sending the response in parts.
+     */
+    private static short maxResponsePartLength() {
+        Fault force = Fault.findActiveChain(Fault.CHAIN_FORCE);
+        return (force == null) ? MAX_RESPONSE_PART_LENGTH : (short) (force.getParameter((short) 1) & 0x00FF);
+    }
+
+    /**
+     * Status '6Cxx' of a wrong expected length, xx is the exact length.
+     */
+    protected static short correctLengthStatus(short length) {
+        Fault wrongExactLength = Fault.findActiveChain(Fault.CHAIN_WRONG_EXACT_LENGTH);
+        if (wrongExactLength != null) {
+            length = (short) (wrongExactLength.getParameter((short) 1) & 0x00FF);
+        }
+        return (short) (ISO7816.SW_CORRECT_LENGTH_00 | (length & 0x00FF));
     }
 
     /**
@@ -463,36 +544,45 @@ public abstract class EmvApplet extends Applet {
         JCSystem.beginTransaction();
 
         responseTemplateTag = (short) 0x0077;
-        randomResponseSuffixData = false;
         cardBlocked = false;
+        defaultReadRecord = null;
         dataStore.scope = EmvTag.SCOPE_ANY;
 
         JCSystem.commitTransaction();
 
+        Fault.setSeed((short) 0);
+        Fault.clear(dataStore);
         ApduLog.clear();
         ReadRecord.clear();
         EmvTag.clear();
     }
 
-    protected void fuzzReset(APDU apdu, byte[] buf) {
-        if (Util.getShort(buf, ISO7816.OFFSET_P1) != 0x0000) {
-            ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+    /**
+     * Reset faults: P1 P2 '00 00' clears the faults and the fallback READ RECORD of the applet, '00 01' sets the card wide
+     * seed (2) of the random numbers of the faults, seed '00 00' uses the random generator of the card. The pseudo-random
+     * sequence of a seed restarts when it is set, when the faults are cleared and at card reset.
+     */
+    protected void faultReset(APDU apdu, byte[] buf, short dataLength) {
+        switch (Util.getShort(buf, ISO7816.OFFSET_P1)) {
+            case (short) 0x0000:
+                if (dataLength != (short) 0) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                defaultReadRecord = null;
+                Fault.clear(dataStore);
+                break;
+            case (short) 0x0001:
+                if (dataLength != (short) 2) {
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                Fault.setSeed(Util.getShort(buf, ISO7816.OFFSET_CDATA));
+                break;
+            default:
+                ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
+                break;
         }
 
-        fuzzReset();
-
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
-    }
-
-    protected void fuzzReset() {
-        JCSystem.beginTransaction();
-
-        randomResponseSuffixData = false;
-        defaultReadRecord = null;
-
-        JCSystem.commitTransaction();
-
-        EmvTag.clearFuzz();
     }
 
     protected void consumeLogs(APDU apdu, byte[] buf) {
@@ -583,22 +673,17 @@ public abstract class EmvApplet extends Applet {
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
     }
 
-    protected void processSetEmvTagFuzz(APDU apdu, byte[] buf, short dataLength) {
-        short tagId = Util.getShort(buf, ISO7816.OFFSET_P1);
-
-        if (dataLength != (short) 4) {
-            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
-        }
-
-        EmvTag tag = EmvTag.findTag(tagId);
-        if (tag == null) {
+    /**
+     * Set fault of the table entry P1 (0 - 7), P2 is '00'. Command data is kind (1) || INS of the triggering command, '00' any (1) ||
+     * interface, see EmvTag.SCOPE_* (1) || trigger mode (1) || trigger argument n (1) || kind specific data, see Fault.
+     * Tag faults have the BER-TLV tag of one to three bytes before the kind specific data. Empty data clears the entry.
+     */
+    protected void processSetFault(APDU apdu, byte[] buf, short dataLength) {
+        if (buf[ISO7816.OFFSET_P2] != (byte) 0x00) {
             ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
         }
 
-        tag.fuzzOffset     = buf[(short) (ISO7816.OFFSET_CDATA)];
-        tag.fuzzLength     = buf[(short) (ISO7816.OFFSET_CDATA + 1)];
-        tag.fuzzFlags      = buf[(short) (ISO7816.OFFSET_CDATA + 2)];
-        tag.fuzzOccurrence = buf[(short) (ISO7816.OFFSET_CDATA + 3)];
+        Fault.set(dataStore, (short) buf[ISO7816.OFFSET_P1], buf, (short) ISO7816.OFFSET_CDATA, dataLength);
 
         ISOException.throwIt(ISO7816.SW_NO_ERROR);
     }
@@ -753,15 +838,24 @@ public abstract class EmvApplet extends Applet {
     }
 
     protected void sendResponse(APDU apdu, byte[] buf, byte[] data, short dataOffset, short length) {
+        Fault truncate = Fault.findActiveChain(Fault.CHAIN_TRUNCATE);
+        if (truncate != null) {
+            length -= (short) (truncate.getParameter((short) 1) & 0x00FF);
+            if (length < (short) 0) {
+                length = (short) 0;
+            }
+        }
+
+        final short maxPartLength = maxResponsePartLength();
         boolean deferred = responseDeferred[0] && length > (short) 0;
-        if (deferred || length > MAX_RESPONSE_PART_LENGTH) {
+        if (deferred || length > maxPartLength) {
             // Response data in the APDU buffer is at the command data offset
             short offset = (data == buf) ? (short) ISO7816.OFFSET_CDATA : dataOffset;
             Util.arrayCopy(data, offset, responseBuffer, (short) 0, length);
             pendingResponse[PENDING_RESPONSE_OFFSET] = (short) 0;
             pendingResponse[PENDING_RESPONSE_LENGTH] = length;
             if (!deferred) {
-                sendResponsePart(apdu, buf, MAX_RESPONSE_PART_LENGTH);
+                sendResponsePart(apdu, buf, maxPartLength);
             }
             return;
         }
@@ -783,9 +877,11 @@ public abstract class EmvApplet extends Applet {
         short length = (remaining < maxLength) ? remaining : maxLength;
 
         Util.arrayCopyNonAtomic(responseBuffer, offset, buf, (short) 0, length);
-        remaining -= length;
-        pendingResponse[PENDING_RESPONSE_OFFSET] = (short) (offset + length);
-        pendingResponse[PENDING_RESPONSE_LENGTH] = remaining;
+        // The same part is sent again with a fault
+        if (Fault.findActiveChain(Fault.CHAIN_REPEAT) == null) {
+            pendingResponse[PENDING_RESPONSE_OFFSET] = (short) (offset + length);
+            pendingResponse[PENDING_RESPONSE_LENGTH] = (short) (remaining - length);
+        }
 
         ApduLog.addLogEntry(buf, (short) 0, (byte) length);
         apdu.setOutgoingAndSend((short) 0, length);
@@ -805,14 +901,15 @@ public abstract class EmvApplet extends Applet {
             EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
         }
 
+        final short maxPartLength = maxResponsePartLength();
         short expectedLength = (short) (buf[ISO7816.OFFSET_LC] & 0x00FF);
-        if (isProtocolT0() && remaining <= MAX_RESPONSE_PART_LENGTH && (expectedLength == (short) 0 || expectedLength > remaining)) {
-            EmvApplet.logAndThrow((short) (ISO7816.SW_CORRECT_LENGTH_00 | remaining));
+        if (isProtocolT0() && remaining <= maxPartLength && (expectedLength == (short) 0 || expectedLength > remaining)) {
+            EmvApplet.logAndThrow(correctLengthStatus(remaining));
         }
 
         // Le '00' is the maximum
-        if (expectedLength == (short) 0 || expectedLength > MAX_RESPONSE_PART_LENGTH) {
-            expectedLength = MAX_RESPONSE_PART_LENGTH;
+        if (expectedLength == (short) 0 || expectedLength > maxPartLength) {
+            expectedLength = maxPartLength;
         }
 
         sendResponsePart(apdu, buf, expectedLength);
@@ -828,7 +925,8 @@ public abstract class EmvApplet extends Applet {
     /**
      * READ RECORD response of a record set as is: the record template '70' as personalized, except the primitive data objects of
      * the template that the card has generated have their current value, e.g. Card Authentication Related Data (9F69) of fDDA that
-     * is signed in GET PROCESSING OPTIONS and read by the terminal from the record. Padding and other data objects are kept as is.
+     * is signed in GET PROCESSING OPTIONS and read by the terminal from the record. Padding and other data objects are kept as is,
+     * except the data objects and the record template with active faults.
      */
     private short copyRawRecord(ReadRecord readRecord, byte[] dst) {
         final short end = readRecord.copyDataToArray(tmpBuffer, (short) 0);
@@ -855,6 +953,7 @@ public abstract class EmvApplet extends Applet {
                 valueLength = (short) (tmpBuffer[offset] & 0x00FF);
                 offset++;
             }
+            final short recordValueOffset = offset;
             offset += valueLength;
 
             EmvTag tag = null;
@@ -863,12 +962,20 @@ public abstract class EmvApplet extends Applet {
             }
             if (tag != null && tag.isGenerated()) {
                 dstOffset = tag.copyToArray(dst, dstOffset);
+            } else if (tag != null && Fault.isTagFaulted(tag.getTag())) {
+                dstOffset = tag.copyToArray(tmpBuffer, recordValueOffset, valueLength, dst, dstOffset);
             } else {
                 dstOffset = Util.arrayCopyNonAtomic(tmpBuffer, tagOffset, dst, dstOffset, (short) (offset - tagOffset));
             }
         }
 
         short length = (short) (dstOffset - valueOffset);
+        if (length <= (short) 0x00FF && Fault.isTagFaulted(TAG_70)) {
+            // Record template with its faults, the template is stored like the records built from a tag list
+            Util.arrayCopyNonAtomic(dst, valueOffset, tmpBuffer, (short) 0, length);
+            return EmvTag.setTag((short) 0x0070, tmpBuffer, (short) 0, (byte) length).copyToArray(dst, (short) 0);
+        }
+
         short headerOffset;
         if (length < (short) 0x80) {
             headerOffset = (short) (valueOffset - 2);
@@ -919,6 +1026,7 @@ public abstract class EmvApplet extends Applet {
     }
 
     protected EmvApplet() {
+        Fault.init();
         tmpBuffer = JCSystem.makeTransientByteArray((short) 255, JCSystem.CLEAR_ON_DESELECT);
         if (responseBuffer == null) {
             responseBuffer = JCSystem.makeTransientByteArray(RESPONSE_BUFFER_SIZE, JCSystem.CLEAR_ON_DESELECT);

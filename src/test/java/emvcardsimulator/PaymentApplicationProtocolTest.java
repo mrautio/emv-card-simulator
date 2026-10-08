@@ -1032,7 +1032,7 @@ public class PaymentApplicationProtocolTest {
         assertSw(0x9000, send("80 01 9F 36 02 00 F5"));
         assertSw(0x9000, send("80 00 00 02 02 00 80"));
         assertSw(0x9000, send("80 A8 00 00 02 83 00 00"));
-        assertSw(0x9000, send("80 11 9F 36 04 00 00 00 00"));
+        assertSw(0x9000, send("80 11 00 00 00"));
         assertSw(0x9000, send("80 CA 9F 36 00"));
 
         String[] expectedLog = new String[] {

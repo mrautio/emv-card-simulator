@@ -52,7 +52,7 @@ fn set_apdu_response(env: JNIEnv, response_apdu: JByteArray) {
 struct JavaSmartCardConnection {}
 
 impl ApduInterface for JavaSmartCardConnection {
-    fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, ()> {
+    fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, EmvError> {
         trace!("CALLING {:02X?}", apdu);
         SENT_COMMANDS.lock().unwrap().push(apdu.to_vec());
 
@@ -136,7 +136,7 @@ impl ApduRequestResponse {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let response = ApduRequestResponse::to_raw_vec(&apdu.res);
 
-            let (response_trailer, _) = connection.send_apdu(&request);
+            let response_trailer = connection.send_apdu(&request).map_err(|err| err.to_string())?.sw;
             if &response_trailer[..] != &response[..] {
                 return Err(format!(
                     "Response not what expected! setup_file:{}, expected:{:02X?}, actual:{:02X?}",
@@ -289,11 +289,12 @@ fn verify_authorisation_request_cryptogram(
     );
 }
 
-fn pin_entry() -> Result<String, ()> {
+fn pin_entry() -> Result<String, EmvError> {
     Ok("1234".to_string())
 }
 
-fn start_transaction(connection: &mut EmvConnection) -> Result<(), ()> {
+/// Start the transaction with fixed transaction data, the terminal does not overwrite the data objects that are already set
+fn start_transaction(connection: &mut EmvConnection, application: &EmvApplication) -> Result<(), EmvError> {
     // force transaction date as 24.07.2020
     connection.add_tag("9A", b"\x20\x07\x24".to_vec());
 
@@ -304,15 +305,13 @@ fn start_transaction(connection: &mut EmvConnection) -> Result<(), ()> {
     // transaction amount 0,01 EUR
     connection.add_tag("9F02", b"\x00\x00\x00\x00\x00\x01".to_vec());
 
-    Ok(())
+    connection.start_transaction(application)
 }
 
 fn setup_connection(connection: &mut EmvConnection) -> Result<(), ()> {
     connection.contactless = false;
     connection.pse_application_select_callback = None;
-    connection.pin_callback = Some(&pin_entry);
-    connection.amount_callback = None;
-    connection.start_transaction_callback = Some(&start_transaction);
+    connection.pin_callback = Some(Box::new(pin_entry));
 
     Ok(())
 }
@@ -368,7 +367,7 @@ fn contact_transaction_with(
     let application =
         select_application(connection, None, &["../config/card_setup_app_apdus.yaml"]);
 
-    connection.start_transaction(&application).unwrap();
+    start_transaction(connection, &application).unwrap();
 
     connection.process_settings().unwrap();
 
@@ -404,13 +403,7 @@ fn contact_transaction_with(
         );
 
         connection.handle_issuer_authentication_data().unwrap();
-        assert!(
-            !connection
-                .settings
-                .terminal
-                .tvr
-                .issuer_authentication_failed
-        );
+        assert!(!connection.state.tvr.issuer_authentication_failed);
     }
 
     let cryptogram_type = connection.handle_2nd_generate_ac().unwrap();
@@ -459,7 +452,7 @@ const MAX_LOG_ENTRIES: usize = 10;
 fn consume_logs(connection: &mut EmvConnection) -> usize {
     let mut entries = 0;
     loop {
-        let (response_trailer, _) = connection.send_apdu(b"\x80\x06\x00\x00\x00");
+        let response_trailer = connection.send_apdu(b"\x80\x06\x00\x00\x00").unwrap().sw;
         if response_trailer[..] == b"\x6A\x83"[..] {
             return entries;
         }
@@ -496,7 +489,7 @@ fn mastercard_contactless_transaction_with(
     let application = select_application(connection, Some(0x02), &setup_files);
 
     SENT_COMMANDS.lock().unwrap().clear();
-    connection.start_transaction(&application).unwrap();
+    start_transaction(connection, &application).unwrap();
 
     let aip = connection.get_tag_value("82").unwrap().clone();
     assert!(connection.icc.capabilities.cda, "CDA supported in AIP");
@@ -523,7 +516,7 @@ fn mastercard_contactless_transaction_with(
     );
     assert_eq!(&relay_resistance_data[8..], RELAY_RESISTANCE_TIMING);
     assert_eq!(
-        connection.settings.terminal.tvr.relay_resistance_performed,
+        connection.state.tvr.relay_resistance_performed,
         RelayResistancePerformed::Performed
     );
 
@@ -679,7 +672,7 @@ fn visa_contactless_transaction(connection: &mut EmvConnection) {
         ],
     );
 
-    connection.start_transaction(&application).unwrap();
+    start_transaction(connection, &application).unwrap();
 
     // Card completed the transaction in GET PROCESSING OPTIONS
     for tag in ["9F26", "9F27", "9F36", "9F10", "9F4B", "9F69"] {
@@ -705,7 +698,7 @@ fn visa_contactless_transaction(connection: &mut EmvConnection) {
     connection.handle_terminal_risk_management().unwrap();
 
     connection.handle_offline_data_authentication().unwrap();
-    assert!(!connection.settings.terminal.tvr.dda_failed, "fDDA failed");
+    assert!(!connection.state.tvr.dda_failed, "fDDA failed");
     // ICC Dynamic Number recovered from the fDDA signature
     assert!(connection.get_tag_value("9F4C").is_some());
 
@@ -758,8 +751,7 @@ fn run_transaction_with_settings(
 
     let result = panic::catch_unwind(|| {
         let mut connection = EmvConnection::new(settings_file).unwrap();
-        let smart_card_connection = JavaSmartCardConnection {};
-        connection.interface = Some(&smart_card_connection);
+        connection.interface = Some(Box::new(JavaSmartCardConnection {}));
 
         transaction(&mut connection);
     });
@@ -939,7 +931,7 @@ impl PrivateCard {
     }
 }
 
-fn private_card_pin_entry() -> Result<String, ()> {
+fn private_card_pin_entry() -> Result<String, EmvError> {
     Ok(PRIVATE_CARD_PIN.lock().unwrap().clone())
 }
 
@@ -1142,7 +1134,7 @@ fn private_card_online_authorisation(connection: &mut EmvConnection, card: &Priv
 
     connection.handle_issuer_authentication_data().unwrap();
     assert!(
-        !connection.settings.terminal.tvr.issuer_authentication_failed,
+        !connection.state.tvr.issuer_authentication_failed,
         "Issuer authentication failed"
     );
 
@@ -1150,7 +1142,7 @@ fn private_card_online_authorisation(connection: &mut EmvConnection, card: &Priv
 }
 
 fn private_card_tvr(connection: &EmvConnection) -> String {
-    let tvr = &connection.settings.terminal.tvr;
+    let tvr = &connection.state.tvr;
     let mut flags = Vec::new();
     for (set, name) in [
         (tvr.offline_data_authentication_was_not_performed, "ODA not performed"),
@@ -1177,7 +1169,7 @@ fn private_card_tvr(connection: &EmvConnection) -> String {
 fn private_card_contact_transaction(connection: &mut EmvConnection) {
     let mut card = PrivateCard::load();
     setup_connection(connection).unwrap();
-    connection.pin_callback = Some(&private_card_pin_entry);
+    connection.pin_callback = Some(Box::new(private_card_pin_entry));
 
     execute_setup_apdus(connection, &[&card.file]);
 
@@ -1187,8 +1179,9 @@ fn private_card_contact_transaction(connection: &mut EmvConnection) {
         select.push(aid.len() as u8);
         select.extend_from_slice(aid);
         select.push(0x00);
-        let (response_trailer, response_data) = connection.send_apdu(&select);
-        if response_trailer != b"\x90\x00" || response_data.is_empty() {
+        let response = connection.send_apdu(&select).unwrap();
+        let (response_trailer, response_data) = (response.sw, response.data);
+        if response_trailer != *b"\x90\x00" || response_data.is_empty() {
             info!("Application {} not available: {:02X?}", hex::encode_upper(aid), response_trailer);
             continue;
         }
@@ -1214,7 +1207,7 @@ fn private_card_contact_transaction(connection: &mut EmvConnection) {
     card.select(&application.aid);
 
     connection.handle_select_payment_application(&application).unwrap();
-    connection.start_transaction(&application).expect("Transaction start");
+    start_transaction(connection, &application).expect("Transaction start");
     connection.handle_card_verification_methods().expect("Cardholder verification");
     connection.handle_terminal_risk_management().expect("Terminal risk management");
     connection.handle_offline_data_authentication().expect("Offline data authentication");
@@ -1251,7 +1244,7 @@ fn private_card_contactless_transaction(connection: &mut EmvConnection) {
     let mut card = PrivateCard::load();
     setup_connection(connection).unwrap();
     connection.contactless = true;
-    connection.pin_callback = Some(&private_card_pin_entry);
+    connection.pin_callback = Some(Box::new(private_card_pin_entry));
 
     execute_setup_apdus(connection, &[&card.file]);
     SENT_COMMANDS.lock().unwrap().clear();
@@ -1263,7 +1256,7 @@ fn private_card_contactless_transaction(connection: &mut EmvConnection) {
     card.select(&application.aid);
 
     connection.handle_select_payment_application(&application).unwrap();
-    connection.start_transaction(&application).expect("Transaction start");
+    start_transaction(connection, &application).expect("Transaction start");
     connection.handle_terminal_risk_management().expect("Terminal risk management");
     connection.handle_offline_data_authentication().expect("Offline data authentication");
     connection.handle_terminal_action_analysis().expect("Terminal action analysis");
