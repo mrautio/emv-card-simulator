@@ -30,19 +30,17 @@ pub struct SmartCardConnection {
 }
 
 impl ApduInterface for SmartCardConnection {
-    fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, ()> {
-        let mut output: Vec<u8> = Vec::new();
+    fn send_apdu(&self, apdu: &[u8]) -> Result<Vec<u8>, EmvError> {
+        let Some(card) = self.card.as_ref() else {
+            return Err(EmvError::Interface("Card not connected".to_string()));
+        };
 
         let mut apdu_response_buffer = [0; MAX_BUFFER_SIZE];
-        output.extend_from_slice(
-            self.card
-                .as_ref()
-                .unwrap()
-                .transmit(apdu, &mut apdu_response_buffer)
-                .unwrap(),
-        );
+        let response = card
+            .transmit(apdu, &mut apdu_response_buffer)
+            .map_err(|err| EmvError::Interface(format!("Transmit failed: {}", err)))?;
 
-        Ok(output)
+        Ok(response.to_vec())
     }
 }
 
@@ -177,7 +175,7 @@ impl ApduRequestResponse {
             let request = ApduRequestResponse::to_raw_vec(&apdu.req);
             let response = ApduRequestResponse::to_raw_vec(&apdu.res);
 
-            let (response_trailer, _) = connection.send_apdu(&request);
+            let response_trailer = connection.send_apdu(&request).map_err(|err| err.to_string())?.sw;
             if &response_trailer[..] != &response[..] {
                 return Err(format!(
                     "Response not what expected! expected:{:02X?}, actual:{:02X?}",
@@ -241,12 +239,12 @@ fn run() -> Result<Option<String>, String> {
             _ => return Err("Could not connect to the reader".to_string()),
         }
     }
-    connection.interface = Some(&smart_card_connection);
+    connection.interface = Some(Box::new(smart_card_connection));
 
     if let Some(send_apdu) = matches.get_one::<String>("send-apdu") {
         let request = ApduRequestResponse::to_raw_vec(send_apdu);
 
-        connection.send_apdu(&request);
+        connection.send_apdu(&request).map_err(|err| err.to_string())?;
 
         return Ok(None);
     } else if let Some(load) = matches.get_one::<String>("load") {
