@@ -31,11 +31,6 @@ public class EmvTag {
     // Value is set by the card in the command processing, e.g. Card Authentication Related Data (9F69), not by personalization
     private boolean generated = false;
 
-    public byte fuzzOffset      = (byte) 0x00;
-    public byte fuzzLength      = (byte) 0x00;
-    public byte fuzzFlags       = (byte) 0x00;
-    public byte fuzzOccurrence  = (byte) 0x00;
-
     // Tag is stored right aligned in three bytes, e.g. '00 00 82', '00 9F 36' or 'DF 81 01'
     private static final short TAG_SIZE = (short) 3;
 
@@ -270,18 +265,6 @@ public class EmvTag {
     }
 
     /**
-     * Clear all fuzz settings.
-     */
-    public static void clearFuzz() {
-        for (EmvTag iter = DataStore.current.tagHead; iter != null; iter = iter.next) {
-            iter.fuzzOffset      = (byte) 0x00;
-            iter.fuzzLength      = (byte) 0x00;
-            iter.fuzzFlags       = (byte) 0x00;
-            iter.fuzzOccurrence  = (byte) 0x00;
-        }
-    }
-
-    /**
      * Remove tag.
      */
     public static boolean removeTag(short tagId) {
@@ -370,34 +353,84 @@ public class EmvTag {
     }
 
     /**
-     * Serialize tag as BER-TLV to array.
+     * Serialize tag as BER-TLV to array, with the active faults of the tag. Bytes beyond dst are not written, the returned
+     * offset is at most the length of dst.
      */
     public short copyToArray(byte[] dst, short dstOffset) {
-        short copyOffset = dstOffset;
+        return copyToArray(data, (short) 0, (short) (length & 0x00FF), dst, dstOffset);
+    }
 
-        copyOffset = copyTagToArray(dst, copyOffset);
+    /**
+     * Serialize tag as BER-TLV with the given value to array, with the active faults of the tag, e.g. the value of the tag in a
+     * record. Bytes beyond dst are not written, the returned offset is at most the length of dst.
+     */
+    public short copyToArray(byte[] src, short srcOffset, short valueLength, byte[] dst, short dstOffset) {
+        final short limit = (short) dst.length;
 
-        short shortLength = (short) (length & 0x00FF);
-        if (shortLength >= 128) {
-            dst[copyOffset] = (byte) 0x81;
-            copyOffset += (short) 1;
+        Fault encoding = Fault.findActive(Fault.KIND_TAG_ENCODING, tag);
+        final byte mode = (encoding == null) ? (byte) 0x00 : encoding.getMode();
+        if (mode == Fault.ENCODING_OMIT) {
+            return dstOffset;
+        }
+        if (mode == Fault.ENCODING_PADDING) {
+            short paddingLength = (short) (encoding.getParameter((short) 1) & 0x00FF);
+            Fault.fill(dst, dstOffset, paddingLength, encoding.getParameter((short) 2));
+            dstOffset = clamp((short) (dstOffset + paddingLength), limit);
         }
 
-        short lengthOffset = copyOffset;
-        copyOffset += (short) 1;
-        copyOffset = copyDataToArray(dst, copyOffset);
-
-        dst[lengthOffset] = length;
-
-        // re-write tag length with fuzz overflow?
-        if (fuzzLength > 0x00 && (fuzzFlags & (1 << 0)) == 1) {
-            // TODO: How to handle the case that tag length would need to be represented as two bytes instead of one?
-            dst[lengthOffset] = (byte) (copyOffset - lengthOffset - 1);
+        final short start = dstOffset;
+        dstOffset = copyTagToArray(dst, dstOffset);
+        if (start >= limit) {
+            return limit;
+        }
+        if (mode == Fault.ENCODING_CONSTRUCTED) {
+            dst[start] |= (byte) 0x20;
+        }
+        if (mode == Fault.ENCODING_TRUNCATED_TAG) {
+            // First tag byte announcing a subsequent byte
+            dst[start] |= (byte) 0x1F;
+            return (short) (start + 1);
         }
 
+        final short mutatedLength = Fault.mutatedLength(tag, valueLength);
 
+        // Length
+        short encodedLength = mutatedLength;
+        short lengthBytes = (short) 0;
+        if (mode == Fault.ENCODING_LENGTH_DELTA) {
+            encodedLength += (short) encoding.getParameter((short) 1);
+            encodedLength = (encodedLength < (short) 0) ? (short) 0 : (encodedLength > (short) 0x00FF ? (short) 0x00FF : encodedLength);
+        } else if (mode == Fault.ENCODING_LONG_FORM_LENGTH) {
+            lengthBytes = (short) encoding.getParameter((short) 1);
+        }
+        if (mode == Fault.ENCODING_INDEFINITE_LENGTH) {
+            dstOffset = put(dst, dstOffset, (byte) 0x80);
+        } else {
+            if (lengthBytes == (short) 0 && encodedLength >= (short) 0x80) {
+                lengthBytes = (short) 1;
+            }
+            if (lengthBytes > (short) 0) {
+                dstOffset = put(dst, dstOffset, (byte) (0x80 | lengthBytes));
+                for (short i = (short) (lengthBytes - 1); i > (short) 0; i--) {
+                    dstOffset = put(dst, dstOffset, (byte) 0x00);
+                }
+            }
+            dstOffset = put(dst, dstOffset, (byte) encodedLength);
+        }
 
-        return copyOffset;
+        // Value
+        dstOffset = copyValueToArray(src, srcOffset, valueLength, dst, dstOffset);
+
+        if (mode == Fault.ENCODING_INDEFINITE_LENGTH && encoding.getParameter((short) 1) != (byte) 0x00) {
+            // End-of-contents
+            dstOffset = put(dst, dstOffset, (byte) 0x00);
+            dstOffset = put(dst, dstOffset, (byte) 0x00);
+        }
+        if (mode == Fault.ENCODING_DUPLICATE) {
+            dstOffset = copy(dst, start, dst, dstOffset, (short) (dstOffset - start));
+        }
+
+        return dstOffset;
     }
 
     /**
@@ -409,34 +442,50 @@ public class EmvTag {
             tagOffset++;
         }
 
-        return Util.arrayCopyNonAtomic(tag, tagOffset, dst, dstOffset, (short) (TAG_SIZE - tagOffset));
+        return copy(tag, tagOffset, dst, dstOffset, (short) (TAG_SIZE - tagOffset));
     }
 
     /**
-     * Serialize tag's data to array, i.e. no BER-TLV header.
+     * Serialize tag's data to array, i.e. no BER-TLV header, with the active value faults of the tag.
+     * Bytes beyond dst are not written, the returned offset is at most the length of dst.
      */
     public short copyDataToArray(byte[] dst, short dstOffset) {
-        short shortLength = (short) (length & 0x00FF);
+        return copyValueToArray(data, (short) 0, (short) (length & 0x00FF), dst, dstOffset);
+    }
 
-        Util.arrayCopy(data, (short) 0, dst, dstOffset, shortLength);
+    private short copyValueToArray(byte[] src, short srcOffset, short valueLength, byte[] dst, short dstOffset) {
+        copy(src, srcOffset, dst, dstOffset, valueLength);
+        Fault.mutate(tag, dst, dstOffset, valueLength);
 
-        if (fuzzLength > (byte) 0x00) {
-            byte doFuzzing = (byte) 0x00;
+        return clamp((short) (dstOffset + Fault.mutatedLength(tag, valueLength)), (short) dst.length);
+    }
 
-            if (fuzzOccurrence > (byte) 0x00) {
-                EmvApplet.randomData.generateData(EmvApplet.tmpBuffer, (short) 0, (short) 1);
-                doFuzzing = (byte) (EmvApplet.tmpBuffer[(short) 0] % fuzzOccurrence);
-            }
+    private static short clamp(short offset, short limit) {
+        return (offset > limit) ? limit : offset;
+    }
 
-            if (doFuzzing == (byte) 0x00) {
-                EmvApplet.randomData.generateData(dst, (short) (dstOffset + (fuzzOffset & 0x00FF)), (short) (fuzzLength & 0x00FF));
-
-                if (fuzzLength + fuzzOffset > shortLength) {
-                    shortLength = (short) ((fuzzLength & 0x00FF) + (fuzzOffset & 0x00FF));
-                }
-            }
+    /**
+     * Write byte to dst unless beyond it, returns the next offset at most the length of dst.
+     */
+    private static short put(byte[] dst, short dstOffset, byte value) {
+        if (dstOffset >= (short) dst.length) {
+            return (short) dst.length;
         }
+        dst[dstOffset] = value;
+        return (short) (dstOffset + 1);
+    }
 
-        return (short) (dstOffset + shortLength);
+    /**
+     * Copy bytes to dst, bytes beyond dst are not written. Returns the next offset at most the length of dst.
+     */
+    private static short copy(byte[] src, short srcOffset, byte[] dst, short dstOffset, short length) {
+        short available = (short) (dst.length - dstOffset);
+        if (length > available) {
+            length = available;
+        }
+        if (length <= (short) 0) {
+            return clamp(dstOffset, (short) dst.length);
+        }
+        return Util.arrayCopyNonAtomic(src, srcOffset, dst, dstOffset, length);
     }
 }
