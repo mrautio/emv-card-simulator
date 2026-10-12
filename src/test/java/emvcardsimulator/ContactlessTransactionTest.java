@@ -107,6 +107,67 @@ public class ContactlessTransactionTest {
         assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 AE 80 00 1D " + CDOL1_DATA + " 00"));
     }
 
+    /**
+     * qVSDC online transaction with the Application Cryptogram of a Visa Cryptogram Version Number in the Issuer Application Data.
+     */
+    private static ResponseAPDU qvsdcVisaTransaction(String cryptogramVersion) throws CardException {
+        assertSw(0x9000, send("80 00 00 19 01 " + cryptogramVersion));
+        assertSw(0x9000, send("80 01 9F 10 07 06 01 " + cryptogramVersion + " 03 00 00 00"));
+        ResponseAPDU response = qvsdcTransaction(TTQ_ONLINE_CRYPTOGRAM_REQUIRED);
+        assertEquals((byte) 0x80, cryptogramType(response));
+        return response;
+    }
+
+    private static byte[] visaApplicationCryptogram(int cryptogramVersion, ResponseAPDU response) throws GeneralSecurityException {
+        return EmvTestUtil.visaApplicationCryptogram(cryptogramVersion, hex(AC_MASTER_KEY), hex(CDOL1_DATA), hex(AIP),
+            findTag(response.getData(), 0x9F36), findTag(response.getData(), 0x9F10));
+    }
+
+    /**
+     * Visa Cryptogram Version Numbers 10, 17 and 18: the Application Cryptogram is over the data of the version, not over the PDOL
+     * related data that has the Terminal Transaction Qualifiers.
+     */
+    @Test
+    public void qvsdcVisaCryptogramVersionTest() throws CardException, GeneralSecurityException {
+        enableQvsdc("00 05", "82 94 57 9F 10 9F 26 9F 27 9F 36 9F 6C");
+        assertSw(0x9000, send("80 00 00 0D 02 02 03"));
+        // Visa CVR: second GENERATE AC not requested, ARQC in GET PROCESSING OPTIONS, new card, fDDA performed (AIP '3C 00')
+        final byte[] issuerApplicationData = hex("06 01 0A 03 A0 10 02");
+
+        ResponseAPDU response = qvsdcVisaTransaction("0A");
+        assertArrayEquals(hex("00 F1"), findTag(response.getData(), 0x9F36));
+        assertArrayEquals(issuerApplicationData, findTag(response.getData(), 0x9F10));
+        // Known answer: MAC(MK_AC) of CDOL1_DATA || '3C 00' || '00 F1' || '03 A0 10 02' || '00 00 00'
+        assertArrayEquals(hex("F8 F0 EB BC 00 61 D4 88"), findTag(response.getData(), 0x9F26));
+        assertArrayEquals(visaApplicationCryptogram(0x0A, response), findTag(response.getData(), 0x9F26));
+
+        response = qvsdcVisaTransaction("11");
+        assertArrayEquals(visaApplicationCryptogram(0x11, response), findTag(response.getData(), 0x9F26));
+
+        response = qvsdcVisaTransaction("12");
+        assertArrayEquals(visaApplicationCryptogram(0x12, response), findTag(response.getData(), 0x9F26));
+
+        // EMV default: PDOL related data arranged as CDOL1 related data || AIP || ATC
+        assertSw(0x9000, send("80 00 00 19 01 00"));
+        response = qvsdcTransaction(TTQ_ONLINE_CRYPTOGRAM_REQUIRED);
+        byte[] atc = findTag(response.getData(), 0x9F36);
+        assertArrayEquals(retailMac(deriveSessionKey(hex(AC_MASTER_KEY), atc), concat(hex(CDOL1_DATA), hex(AIP), atc)),
+            findTag(response.getData(), 0x9F26));
+    }
+
+    @Test
+    public void visaCryptogramVersionSettingTest() throws CardException {
+        assertSw(ISO7816.SW_WRONG_LENGTH, send("80 00 00 19 03 01 0A 00"));
+        assertSw(ISO7816.SW_DATA_INVALID, send("80 00 00 19 01 16"));
+
+        // Issuer Application Data without the Visa CVR
+        enableQvsdc("00 05", "82 94 57 9F 10 9F 26 9F 27 9F 36");
+        assertSw(0x9000, send("80 00 00 19 01 0A"));
+        assertSw(0x9000, send("80 01 9F 10 03 06 01 0A"));
+        assertSw(0x9000, send(SELECT));
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 A8 00 00 23 83 21 " + TTQ_ONLINE_CRYPTOGRAM_REQUIRED + " " + CDOL1_DATA + " 00"));
+    }
+
     @Test
     public void qvsdcOfflineOnlyReaderTest() throws CardException, GeneralSecurityException {
         enableQvsdc("00 07", "82 94 57 9F 10 9F 26 9F 27 9F 36");

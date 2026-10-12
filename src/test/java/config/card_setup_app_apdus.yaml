@@ -22,6 +22,12 @@
 # is generated with EMV Book 2 Common Session Key Derivation (A1.3.1) and ISO/IEC 9797-1 MAC Algorithm 3 (A1.2.1)
 # over CDOL related data || AIP || ATC || Issuer Application Data (9F10) when the IAD flag is set, as in Visa Cryptogram Version
 # Number 18 of the Issuer Application Data of this profile. Clear the key with empty data ('80 00 00 07 00') to use the static 9F26 tag value.
+# Cryptogram Version Number '80 00 00 19 02' || payment system || CVN generates the Application Cryptogram over the data of the version
+# instead, e.g. qVSDC PDOL related data without the Terminal Transaction Qualifiers, '00 00' is the default above.
+# Visa '01': '0A' CVN 10 and '11' CVN 17 with MK_AC as such and zero padding, '12' CVN 18 with the session key.
+# Mastercard '02': M/Chip '10' with the session key of ATC || '00 00' || Unpredictable Number, '14' with the EMV session key, both over
+# the terminal data || AIP || ATC || CVR (6) of Issuer Application Data bytes 3-8. Issuer authentication uses MK_AC with Visa CVN 10
+# and 17 and M/Chip CVN 10. A Visa CVN can be given as one byte, e.g. '80 00 00 19 01 0A'.
 - req: '80 00 00 07 10 01 23 45 67 89 AB CD EF FE DC BA 98 76 54 32 10'
   res: '90 00'
 # Flags: random, Issuer Application Data included in the Application Cryptogram (Cryptogram Version Number 18)

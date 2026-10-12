@@ -155,6 +155,132 @@ public class CardRiskManagementTest {
         assertArrayEquals(hex("06 01 12 03 A0 80 00"), findTag(firstGenerateAc("80").getData(), 0x9F10));
     }
 
+    /**
+     * Visa Cryptogram Version Number 10: ARQC and TC with MK_AC over the data of the version, and ARPC Method 1 with MK_AC.
+     */
+    @Test
+    public void visaCryptogramVersion10Test() throws CardException, GeneralSecurityException {
+        assertSw(0x9000, send("80 00 00 0D 02 02 03"));
+        assertSw(0x9000, send("80 00 00 19 01 0A"));
+        assertSw(0x9000, send("80 01 9F 10 07 06 01 0A 03 00 00 00"));
+        startTransaction();
+
+        ResponseAPDU response = firstGenerateAc("80");
+        byte[] atc = findTag(response.getData(), 0x9F36);
+        byte[] arqc = findTag(response.getData(), 0x9F26);
+        assertArrayEquals(hex("06 01 0A 03 A0 10 00"), findTag(response.getData(), 0x9F10));
+        assertArrayEquals(EmvTestUtil.visaApplicationCryptogram(0x0A, hex(AC_MASTER_KEY), hex(CDOL1_DATA), hex("3C 00"), atc,
+            findTag(response.getData(), 0x9F10)), arqc);
+
+        // ARPC of the session key is not accepted
+        byte[] arpc = Arrays.copyOf(arqc, 8);
+        arpc[0] ^= hex(ARC_APPROVED)[0];
+        arpc[1] ^= hex(ARC_APPROVED)[1];
+        String sessionKeyArpc = toHex(des(Cipher.ENCRYPT_MODE, deriveSessionKey(hex(AC_MASTER_KEY), atc), arpc));
+        assertSw(0x6300, send("00 82 00 00 0A " + sessionKeyArpc + " " + ARC_APPROVED));
+
+        startTransaction();
+        response = firstGenerateAc("80");
+        atc = findTag(response.getData(), 0x9F36);
+        arpc = Arrays.copyOf(findTag(response.getData(), 0x9F26), 8);
+        arpc[0] ^= hex(ARC_APPROVED)[0];
+        arpc[1] ^= hex(ARC_APPROVED)[1];
+        assertSw(0x9000, send("00 82 00 00 0A " + toHex(des(Cipher.ENCRYPT_MODE, hex(AC_MASTER_KEY), arpc)) + " " + ARC_APPROVED));
+
+        // TC over the terminal data of CDOL2 related data, the Authorisation Response Code is not in the data of the version
+        response = secondGenerateAc(ARC_APPROVED);
+        assertEquals((byte) 0x40, cryptogramType(response));
+        assertArrayEquals(EmvTestUtil.visaApplicationCryptogram(0x0A, hex(AC_MASTER_KEY), hex(CDOL1_DATA), hex("3C 00"), atc,
+            findTag(response.getData(), 0x9F10)), findTag(response.getData(), 0x9F26));
+    }
+
+    /**
+     * ARPC Method 1 of the first Application Cryptogram of the response with the key.
+     */
+    private static String arpcMethod1(ResponseAPDU response, byte[] key) throws GeneralSecurityException {
+        byte[] arpc = Arrays.copyOf(findTag(response.getData(), 0x9F26), 8);
+        arpc[0] ^= hex(ARC_APPROVED)[0];
+        arpc[1] ^= hex(ARC_APPROVED)[1];
+        return toHex(des(Cipher.ENCRYPT_MODE, key, arpc)) + " " + ARC_APPROVED;
+    }
+
+    private static byte[] mastercardApplicationCryptogram(int cryptogramVersion, ResponseAPDU response) throws GeneralSecurityException {
+        return EmvTestUtil.mastercardApplicationCryptogram(cryptogramVersion, hex(AC_MASTER_KEY), hex(CDOL1_DATA), hex("3C 00"),
+            findTag(response.getData(), 0x9F36), findTag(response.getData(), 0x9F10));
+    }
+
+    /**
+     * M/Chip Cryptogram Version Number 10: ARQC and TC with the Mastercard session key of ATC and Unpredictable Number over the data of the
+     * version, and ARPC Method 1 with MK_AC.
+     */
+    @Test
+    public void mastercardCryptogramVersion10Test() throws CardException, GeneralSecurityException {
+        // M/Chip Issuer Application Data: Key Derivation Index, CVN '10', CVR (6), DAC/ICC Dynamic Number (2), counters (8)
+        assertSw(0x9000, send("80 01 9F 10 12 01 10 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"));
+        assertSw(0x9000, send("80 00 00 0D 02 03 02"));
+        assertSw(0x9000, send("80 00 00 19 02 02 10"));
+        startTransaction();
+
+        ResponseAPDU response = firstGenerateAc("80");
+        assertArrayEquals(hex("00 F1"), findTag(response.getData(), 0x9F36));
+        // Second GENERATE AC not requested, ARQC. PIN Try Counter 3, domestic transaction
+        assertArrayEquals(hex("01 10 A0 00 03 02 00 00 00 00 00 00 00 00 00 00 00 00"), findTag(response.getData(), 0x9F10));
+        // Known answer: MAC(SK_AC) of CDOL1_DATA || '3C 00' || '00 F1' || 'A0 00 03 02 00 00', SK_AC of R '00 F1 00 00 01 23 45 67'
+        assertArrayEquals(hex("59 48 FF 02 76 E8 69 78"), findTag(response.getData(), 0x9F26));
+        assertArrayEquals(mastercardApplicationCryptogram(0x10, response), findTag(response.getData(), 0x9F26));
+
+        // ARPC of the session key is not accepted
+        byte[] atc = findTag(response.getData(), 0x9F36);
+        assertSw(0x6300, send("00 82 00 00 0A " + arpcMethod1(response, deriveSessionKey(hex(AC_MASTER_KEY), atc))));
+
+        startTransaction();
+        response = firstGenerateAc("80");
+        assertArrayEquals(mastercardApplicationCryptogram(0x10, response), findTag(response.getData(), 0x9F26));
+        assertSw(0x9000, send("00 82 00 00 0A " + arpcMethod1(response, hex(AC_MASTER_KEY))));
+
+        response = secondGenerateAc(ARC_APPROVED);
+        assertEquals((byte) 0x40, cryptogramType(response));
+        assertArrayEquals(mastercardApplicationCryptogram(0x10, response), findTag(response.getData(), 0x9F26));
+    }
+
+    /**
+     * M/Chip Cryptogram Version Number 14: ARQC with the EMV Common Session Key over the data of the version, and ARPC with the session key.
+     */
+    @Test
+    public void mastercardCryptogramVersion14Test() throws CardException, GeneralSecurityException {
+        assertSw(0x9000, send("80 01 9F 10 12 01 14 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"));
+        assertSw(0x9000, send("80 00 00 0D 02 03 02"));
+        assertSw(0x9000, send("80 00 00 19 02 02 14"));
+        startTransaction();
+
+        ResponseAPDU response = firstGenerateAc("80");
+        assertArrayEquals(mastercardApplicationCryptogram(0x14, response), findTag(response.getData(), 0x9F26));
+
+        byte[] atc = findTag(response.getData(), 0x9F36);
+        assertSw(0x9000, send("00 82 00 00 0A " + arpcMethod1(response, deriveSessionKey(hex(AC_MASTER_KEY), atc))));
+        response = secondGenerateAc(ARC_APPROVED);
+        assertEquals((byte) 0x40, cryptogramType(response));
+        assertArrayEquals(mastercardApplicationCryptogram(0x14, response), findTag(response.getData(), 0x9F26));
+    }
+
+    @Test
+    public void cryptogramVersionSettingTest() throws CardException, GeneralSecurityException {
+        // Payment system and Cryptogram Version Number, or a Visa Cryptogram Version Number of one byte
+        assertSw(ISO7816.SW_DATA_INVALID, send("80 00 00 19 02 02 11"));
+        assertSw(ISO7816.SW_DATA_INVALID, send("80 00 00 19 02 00 0A"));
+        assertSw(ISO7816.SW_DATA_INVALID, send("80 00 00 19 02 03 10"));
+        assertSw(ISO7816.SW_WRONG_LENGTH, send("80 00 00 19 03 02 10 00"));
+        assertSw(0x9000, send("80 00 00 19 02 01 0A"));
+        assertSw(0x9000, send("80 00 00 19 01 0A"));
+        assertSw(0x9000, send("80 00 00 19 02 00 00"));
+
+        // M/Chip Issuer Application Data without the CVR
+        assertSw(0x9000, send("80 00 00 19 02 02 10"));
+        assertSw(0x9000, send("80 01 9F 10 03 01 10 00"));
+        startTransaction();
+        assertSw(ISO7816.SW_CONDITIONS_NOT_SATISFIED, send("80 AE 80 00 1D " + CDOL1_DATA + " 00"));
+    }
+
     @Test
     public void commonCoreDefinitionsCardVerificationResultsTest() throws CardException, GeneralSecurityException {
         // Common Core Definitions IAD: length '0F', CCI 'A5', DKI, CVR (5), counters (8)

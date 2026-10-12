@@ -109,6 +109,38 @@ public class PaymentApplication extends EmvApplet {
     private static final byte ARPC_METHOD_1 = (byte) 0x01;
     private static final byte ARPC_METHOD_2 = (byte) 0x02;
 
+    // Application Cryptogram generation: over CDOL related data (EMV Book 2, 8.1), or a Cryptogram Version Number of a payment system,
+    // payment system (1) || Cryptogram Version Number (1) of the Issuer Application Data
+    private static final short CRYPTOGRAM_VERSION_EMV = (short) 0x0000;
+    private static final byte CRYPTOGRAM_SCHEME_VISA = (byte) 0x01;
+    private static final byte CRYPTOGRAM_SCHEME_MASTERCARD = (byte) 0x02;
+    private static final short CRYPTOGRAM_VERSION_VISA_10 = (short) 0x010A;
+    private static final short CRYPTOGRAM_VERSION_VISA_17 = (short) 0x0111;
+    private static final short CRYPTOGRAM_VERSION_VISA_18 = (short) 0x0112;
+    // M/Chip: '10' Mastercard session key derivation with the Unpredictable Number, '14' EMV Common Session Key Derivation,
+    // the Application Cryptogram does not include the counters
+    private static final short CRYPTOGRAM_VERSION_MASTERCARD_10 = (short) 0x0210;
+    private static final short CRYPTOGRAM_VERSION_MASTERCARD_14 = (short) 0x0214;
+
+    // Terminal data of Visa Cryptogram Version Numbers 10 and 18 and M/Chip Cryptogram Version Numbers as a DOL: Amount, Authorised, Amount, Other,
+    // Terminal Country Code, TVR, Transaction Currency Code, Transaction Date, Transaction Type and Unpredictable Number
+    private static final byte[] CRYPTOGRAM_DOL = {
+        (byte) 0x9F, (byte) 0x02, (byte) 0x06, (byte) 0x9F, (byte) 0x03, (byte) 0x06, (byte) 0x9F, (byte) 0x1A, (byte) 0x02,
+        (byte) 0x95, (byte) 0x05, (byte) 0x5F, (byte) 0x2A, (byte) 0x02, (byte) 0x9A, (byte) 0x03, (byte) 0x9C, (byte) 0x01,
+        (byte) 0x9F, (byte) 0x37, (byte) 0x04
+    };
+    // Terminal data of Visa Cryptogram Version Number 17: Amount, Authorised and Unpredictable Number
+    private static final byte[] VISA_CRYPTOGRAM_17_DOL = {
+        (byte) 0x9F, (byte) 0x02, (byte) 0x06, (byte) 0x9F, (byte) 0x37, (byte) 0x04
+    };
+    // Visa Issuer Application Data: length (1) || Derivation Key Index (1) || Cryptogram Version Number (1) || CVR (4) || ..., at most 32 bytes
+    private static final short VISA_IAD_CVR_OFFSET = (short) 3;
+    private static final short VISA_IAD_CVR_LENGTH = (short) 4;
+    private static final short VISA_IAD_MAX_LENGTH = (short) 32;
+    // M/Chip Issuer Application Data: Key Derivation Index (1) || Cryptogram Version Number (1) || CVR (6) || ...
+    private static final short MASTERCARD_IAD_CVR_OFFSET = (short) 2;
+    private static final short MASTERCARD_IAD_CVR_LENGTH = (short) 6;
+
     private Cipher rsaCipher;
     private MessageDigest shaMessageDigest;
     private byte[] challenge;
@@ -144,6 +176,7 @@ public class PaymentApplication extends EmvApplet {
     private byte[] macBlock;
     private short macBlockOffset = 0;
     private byte arpcMethod = ARPC_METHOD_1;
+    private short cryptogramVersion = CRYPTOGRAM_VERSION_EMV;
     // Application Cryptogram of the first GENERATE AC, input for ARPC and secure messaging session key
     private byte[] firstApplicationCryptogram;
 
@@ -369,6 +402,33 @@ public class PaymentApplication extends EmvApplet {
                     ISOException.throwIt(ISO7816.SW_DATA_INVALID);
                 }
                 pinTryLimit = buf[ISO7816.OFFSET_CDATA];
+                break;
+            // CRYPTOGRAM VERSION NUMBER of the Application Cryptogram: payment system (1) || Cryptogram Version Number (1), '00 00' EMV (default),
+            // Visa '01': '0A' CVN 10, '11' CVN 17 or '12' CVN 18, Mastercard '02': '10' or '14' M/Chip. One byte is a Visa CVN or '00' EMV.
+            case 0x0019:
+                short version;
+                if (dataLength == (short) 1) {
+                    version = buf[ISO7816.OFFSET_CDATA] == (byte) 0x00
+                        ? CRYPTOGRAM_VERSION_EMV : Util.makeShort(CRYPTOGRAM_SCHEME_VISA, buf[ISO7816.OFFSET_CDATA]);
+                } else if (dataLength == (short) 2) {
+                    version = Util.getShort(buf, ISO7816.OFFSET_CDATA);
+                } else {
+                    version = CRYPTOGRAM_VERSION_EMV;
+                    ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+                }
+                switch (version) {
+                    case CRYPTOGRAM_VERSION_EMV:
+                    case CRYPTOGRAM_VERSION_VISA_10:
+                    case CRYPTOGRAM_VERSION_VISA_17:
+                    case CRYPTOGRAM_VERSION_VISA_18:
+                    case CRYPTOGRAM_VERSION_MASTERCARD_10:
+                    case CRYPTOGRAM_VERSION_MASTERCARD_14:
+                        break;
+                    default:
+                        ISOException.throwIt(ISO7816.SW_DATA_INVALID);
+                        break;
+                }
+                cryptogramVersion = version;
                 break;
             default:
                 ISOException.throwIt(ISO7816.SW_INCORRECT_P1P2);
@@ -668,8 +728,13 @@ public class PaymentApplication extends EmvApplet {
             return dstOffset;
         }
 
-        byte[] dol = dolTag.getData();
-        short dolLength = (short) (dolTag.getLength() & 0x00FF);
+        return buildDataObjectListData(dolTag.getData(), (short) (dolTag.getLength() & 0x00FF), dst, dstOffset);
+    }
+
+    /**
+     * Build DOL related data for the DOL of dolLength bytes in dol, see buildDataObjectListData(short, byte[], short).
+     */
+    private short buildDataObjectListData(byte[] dol, short dolLength, byte[] dst, short dstOffset) {
         short offset = dstOffset;
 
         short i = (short) 0;
@@ -1325,6 +1390,7 @@ public class PaymentApplication extends EmvApplet {
      * Method 1: Issuer Authentication Data := ARPC (8) || ARC (2), ARPC := DES3(SK_AC)[ARQC XOR (ARC || '00' .. '00')]
      * Method 2: Issuer Authentication Data := ARPC (4) || CSU (4) || Proprietary Authentication Data (0-8),
      *           ARPC := MAC(SK_AC)[ARQC || CSU || Proprietary Authentication Data] with s = 4
+     * Visa Cryptogram Version Numbers 10 and 17 and M/Chip Cryptogram Version Number 10 use MK_AC in place of SK_AC.
      */
     private boolean verifyIssuerAuthenticationData(byte[] src, short offset, short length) {
         EmvTag applicationTransactionCounter = EmvTag.findTag((short) 0x9F36);
@@ -1332,7 +1398,7 @@ public class PaymentApplication extends EmvApplet {
             return false;
         }
 
-        deriveApplicationCryptogramSessionKey(applicationTransactionCounter.getData());
+        initApplicationCryptogramKey(applicationTransactionCounter.getData(), true);
 
         short arpcLength;
         if (arpcMethod == ARPC_METHOD_1) {
@@ -1371,7 +1437,8 @@ public class PaymentApplication extends EmvApplet {
     /**
      * Generate Application Cryptogram (tag 9F26) with Triple DES (EMV Book 2, 8.1 Application Cryptogram Generation).
      * MAC is computed over the CDOL related data of the GENERATE AC command, AIP and ATC,
-     * and optionally the Issuer Application Data as in the Common Core Definitions.
+     * and optionally the Issuer Application Data as in the Common Core Definitions. With a Cryptogram Version Number of a payment
+     * system, the data of the version is used instead, see generateVisaApplicationCryptogram and generateMastercardApplicationCryptogram.
      */
     private void generateApplicationCryptogram(byte[] cdolData, short cdolDataLength) {
         EmvTag applicationTransactionCounter = EmvTag.findTag((short) 0x9F36);
@@ -1379,6 +1446,15 @@ public class PaymentApplication extends EmvApplet {
         if (applicationTransactionCounter == null || applicationTransactionCounter.getLength() != (byte) 2
             || applicationInterchangeProfile == null || applicationInterchangeProfile.getLength() != (byte) 2) {
             EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        if ((byte) (cryptogramVersion >> 8) == CRYPTOGRAM_SCHEME_VISA) {
+            generateVisaApplicationCryptogram(applicationTransactionCounter, applicationInterchangeProfile);
+            return;
+        }
+        if ((byte) (cryptogramVersion >> 8) == CRYPTOGRAM_SCHEME_MASTERCARD) {
+            generateMastercardApplicationCryptogram(applicationTransactionCounter, applicationInterchangeProfile);
+            return;
         }
 
         deriveApplicationCryptogramSessionKey(applicationTransactionCounter.getData());
@@ -1399,11 +1475,117 @@ public class PaymentApplication extends EmvApplet {
     }
 
     /**
+     * Generate Application Cryptogram (tag 9F26) of the Visa Cryptogram Version Number with ISO/IEC 9797-1 MAC Algorithm 3.
+     * The terminal data is taken from the DOL related data of the transaction, e.g. qVSDC PDOL related data where the data objects
+     * of the version are after the Terminal Transaction Qualifiers, missing data objects are zero filled.
+     * CVN 10: MAC(MK_AC)[9F02 || 9F03 || 9F1A || 95 || 5F2A || 9A || 9C || 9F37 || AIP || ATC || CVR (IAD bytes 4-7)], zero padded
+     * CVN 17: MAC(MK_AC)[9F02 || 9F37 || ATC || IAD byte 5 (CVR byte 2)], zero padded
+     * CVN 18: MAC(SK_AC)[9F02 || 9F03 || 9F1A || 95 || 5F2A || 9A || 9C || 9F37 || AIP || ATC || Issuer Application Data], padding method 2
+     */
+    private void generateVisaApplicationCryptogram(EmvTag applicationTransactionCounter, EmvTag applicationInterchangeProfile) {
+        EmvTag issuerApplicationData = EmvTag.findTag((short) 0x9F10);
+        short issuerApplicationDataLength = issuerApplicationData == null ? (short) 0 : (short) (issuerApplicationData.getLength() & 0x00FF);
+        if (issuerApplicationDataLength < (short) (VISA_IAD_CVR_OFFSET + VISA_IAD_CVR_LENGTH) || issuerApplicationDataLength > VISA_IAD_MAX_LENGTH) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        // Key derivation uses the start of tmpBuffer, the data is built after it
+        initApplicationCryptogramKey(applicationTransactionCounter.getData(), false);
+
+        short length;
+        if (cryptogramVersion == CRYPTOGRAM_VERSION_VISA_17) {
+            length = buildDataObjectListData(VISA_CRYPTOGRAM_17_DOL, (short) VISA_CRYPTOGRAM_17_DOL.length, tmpBuffer, (short) 0);
+            length = Util.arrayCopyNonAtomic(applicationTransactionCounter.getData(), (short) 0, tmpBuffer, length, (short) 2);
+            tmpBuffer[length] = issuerApplicationData.getData()[(short) (VISA_IAD_CVR_OFFSET + 1)];
+            length++;
+        } else {
+            length = buildDataObjectListData(CRYPTOGRAM_DOL, (short) CRYPTOGRAM_DOL.length, tmpBuffer, (short) 0);
+            length = Util.arrayCopyNonAtomic(applicationInterchangeProfile.getData(), (short) 0, tmpBuffer, length, (short) 2);
+            length = Util.arrayCopyNonAtomic(applicationTransactionCounter.getData(), (short) 0, tmpBuffer, length, (short) 2);
+            if (cryptogramVersion == CRYPTOGRAM_VERSION_VISA_10) {
+                length = Util.arrayCopyNonAtomic(issuerApplicationData.getData(), VISA_IAD_CVR_OFFSET, tmpBuffer, length, VISA_IAD_CVR_LENGTH);
+            } else {
+                length = Util.arrayCopyNonAtomic(issuerApplicationData.getData(), (short) 0, tmpBuffer, length, issuerApplicationDataLength);
+            }
+        }
+
+        macInit();
+        macUpdate(tmpBuffer, (short) 0, length);
+        if (cryptogramVersion == CRYPTOGRAM_VERSION_VISA_18) {
+            macFinal(tmpBuffer, (short) 0);
+        } else {
+            macFinalZeroPadding(tmpBuffer, (short) 0);
+        }
+
+        EmvTag.setTag((short) 0x9F26, tmpBuffer, (short) 0, (byte) 8);
+    }
+
+    /**
+     * Generate Application Cryptogram (tag 9F26) of the M/Chip Cryptogram Version Number with ISO/IEC 9797-1 MAC Algorithm 3 and
+     * padding method 2, the terminal data as in generateVisaApplicationCryptogram:
+     * MAC(SK_AC)[9F02 || 9F03 || 9F1A || 95 || 5F2A || 9A || 9C || 9F37 || AIP || ATC || CVR (IAD bytes 3-8)]
+     * CVN 10: SK_AC is derived from MK_AC with ATC || '00' || '00' || Unpredictable Number, CVN 14: with ATC as in EMV.
+     */
+    private void generateMastercardApplicationCryptogram(EmvTag applicationTransactionCounter, EmvTag applicationInterchangeProfile) {
+        EmvTag issuerApplicationData = EmvTag.findTag((short) 0x9F10);
+        if (issuerApplicationData == null
+            || (short) (issuerApplicationData.getLength() & 0x00FF) < (short) (MASTERCARD_IAD_CVR_OFFSET + MASTERCARD_IAD_CVR_LENGTH)) {
+            EmvApplet.logAndThrow(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+
+        // Key derivation uses the start of tmpBuffer, the data is built after it
+        initApplicationCryptogramKey(applicationTransactionCounter.getData(), false);
+
+        short length = buildDataObjectListData(CRYPTOGRAM_DOL, (short) CRYPTOGRAM_DOL.length, tmpBuffer, (short) 0);
+        length = Util.arrayCopyNonAtomic(applicationInterchangeProfile.getData(), (short) 0, tmpBuffer, length, (short) 2);
+        length = Util.arrayCopyNonAtomic(applicationTransactionCounter.getData(), (short) 0, tmpBuffer, length, (short) 2);
+        length = Util.arrayCopyNonAtomic(issuerApplicationData.getData(), MASTERCARD_IAD_CVR_OFFSET, tmpBuffer, length,
+            MASTERCARD_IAD_CVR_LENGTH);
+
+        macInit();
+        macUpdate(tmpBuffer, (short) 0, length);
+        macFinal(tmpBuffer, (short) 0);
+
+        EmvTag.setTag((short) 0x9F26, tmpBuffer, (short) 0, (byte) 8);
+    }
+
+    /**
+     * Application Cryptogram key of the Cryptogram Version Number as the MAC key: MK_AC as such for Visa CVN 10 and 17, and for the ARPC of
+     * M/Chip CVN 10. M/Chip CVN 10 Application Cryptogram session key SK_AC is derived from MK_AC with ATC || '00' || '00' || Unpredictable
+     * Number of the transaction, otherwise SK_AC is derived from MK_AC and ATC.
+     */
+    private void initApplicationCryptogramKey(byte[] applicationTransactionCounter, boolean arpc) {
+        final boolean masterKey = cryptogramVersion == CRYPTOGRAM_VERSION_VISA_10 || cryptogramVersion == CRYPTOGRAM_VERSION_VISA_17
+            || (arpc && cryptogramVersion == CRYPTOGRAM_VERSION_MASTERCARD_10);
+        if (cryptogramVersion == CRYPTOGRAM_VERSION_MASTERCARD_10 && !masterKey) {
+            // Diversification value after the key derivation area of tmpBuffer, a missing Unpredictable Number is zero
+            final short diversification = (short) 16;
+            Util.arrayFillNonAtomic(tmpBuffer, diversification, (short) 8, (byte) 0x00);
+            Util.arrayCopyNonAtomic(applicationTransactionCounter, (short) 0, tmpBuffer, diversification, (short) 2);
+            if (findTransactionData((short) 0x9F37) && dataObjectListEntryLength == (short) 4) {
+                Util.arrayCopyNonAtomic(foundTransactionData, foundTransactionDataOffset, tmpBuffer, (short) (diversification + 4), (short) 4);
+            }
+            deriveSessionKey(applicationCryptogramMasterKey, tmpBuffer, diversification, (short) 8);
+            return;
+        }
+        if (!masterKey) {
+            deriveApplicationCryptogramSessionKey(applicationTransactionCounter);
+            return;
+        }
+
+        applicationCryptogramMasterKey.getKey(tmpBuffer, (short) 0);
+        sessionKeyLeft.setKey(tmpBuffer, (short) 0);
+        sessionKeyRight.setKey(tmpBuffer, (short) 8);
+
+        Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 16, (byte) 0x00);
+    }
+
+    /**
      * Derive Application Cryptogram Session Key SK_AC from MK_AC and ATC (EMV Book 2, A1.3.1 Common Session Key Derivation Option).
      * R := ATC || '00' || '00' || '00' || '00' || '00' || '00'
      */
     private void deriveApplicationCryptogramSessionKey(byte[] applicationTransactionCounter) {
-        deriveSessionKey(applicationCryptogramMasterKey, applicationTransactionCounter, (short) 2);
+        deriveSessionKey(applicationCryptogramMasterKey, applicationTransactionCounter, (short) 0, (short) 2);
     }
 
     /**
@@ -1411,10 +1593,11 @@ public class PaymentApplication extends EmvApplet {
      * (EMV Book 2, A1.3.1 Common Session Key Derivation Option).
      * SK := DES3(MK)[R0 || R1 || 'F0' || R3 .. R7] || DES3(MK)[R0 || R1 || '0F' || R3 .. R7]
      */
-    private void deriveSessionKey(DESKey masterKey, byte[] diversification, short diversificationLength) {
+    private void deriveSessionKey(DESKey masterKey, byte[] diversification, short diversificationOffset, short diversificationLength) {
+        // Diversification value may be in tmpBuffer after the first 16 bytes
         Util.arrayFillNonAtomic(tmpBuffer, (short) 0, (short) 16, (byte) 0x00);
-        Util.arrayCopyNonAtomic(diversification, (short) 0, tmpBuffer, (short) 0, diversificationLength);
-        Util.arrayCopyNonAtomic(diversification, (short) 0, tmpBuffer, (short) 8, diversificationLength);
+        Util.arrayCopyNonAtomic(diversification, diversificationOffset, tmpBuffer, (short) 0, diversificationLength);
+        Util.arrayCopyNonAtomic(diversification, diversificationOffset, tmpBuffer, (short) 8, diversificationLength);
         tmpBuffer[2] = (byte) 0xF0;
         tmpBuffer[10] = (byte) 0x0F;
 
@@ -1456,6 +1639,19 @@ public class PaymentApplication extends EmvApplet {
     private void macFinal(byte[] dst, short dstOffset) {
         macBlock[macBlockOffset] ^= (byte) 0x80;
         desCipher.doFinal(macBlock, (short) 0, (short) 8, macBlock, (short) 0);
+
+        macOutputTransformation(dst, dstOffset);
+    }
+
+    /**
+     * Pad with ISO/IEC 9797-1 padding method 1, zero bytes to a multiple of 8 bytes and none for data of a multiple of 8 bytes,
+     * and compute the 8-byte MAC.
+     */
+    private void macFinalZeroPadding(byte[] dst, short dstOffset) {
+        // Remaining bytes of a partial block are the previous block XOR zero padding
+        if (macBlockOffset != (short) 0) {
+            desCipher.doFinal(macBlock, (short) 0, (short) 8, macBlock, (short) 0);
+        }
 
         macOutputTransformation(dst, dstOffset);
     }
@@ -1686,7 +1882,8 @@ public class PaymentApplication extends EmvApplet {
     /**
      * qVSDC: the card completes the transaction in GET PROCESSING OPTIONS (EMV Contactless Book C-3). The card decides the cryptogram type
      * from Terminal Transaction Qualifiers (9F66): byte 2 bit 8 online cryptogram required, byte 1 bit 4 offline-only reader.
-     * Application Cryptogram is generated over the PDOL related data arranged as CDOL1 related data when CDOL1 exists.
+     * Application Cryptogram is generated over the PDOL related data arranged as CDOL1 related data when CDOL1 exists, or over the data
+     * of the Visa Cryptogram Version Number when it is set.
      * With DDA supported in AIP, fDDA Signed Dynamic Application Data (9F4B) and Card Authentication Related Data (9F69) are generated.
      */
     private void generateGetProcessingOptionsCryptogram(byte[] buf) {
@@ -2049,7 +2246,7 @@ public class PaymentApplication extends EmvApplet {
             EmvApplet.logAndThrow(SW_INCORRECT_SM_DATA_OBJECTS);
         }
 
-        deriveSessionKey(secureMessagingMacMasterKey, firstApplicationCryptogram, (short) 8);
+        deriveSessionKey(secureMessagingMacMasterKey, firstApplicationCryptogram, (short) 0, (short) 8);
 
         macInit();
         macUpdate(secureMessagingMacChain, (short) 0, (short) 8);
@@ -2086,7 +2283,7 @@ public class PaymentApplication extends EmvApplet {
 
         final short plainDataLength = (short) (dataLength - SECURE_MESSAGING_FORMAT_2_MAC_LENGTH);
 
-        deriveSessionKey(secureMessagingMacMasterKey, firstApplicationCryptogram, (short) 8);
+        deriveSessionKey(secureMessagingMacMasterKey, firstApplicationCryptogram, (short) 0, (short) 8);
 
         macInit();
         macUpdate(buf, (short) ISO7816.OFFSET_CLA, (short) 5);
