@@ -95,6 +95,57 @@ final class EmvTestUtil {
     }
 
     /**
+     * ISO/IEC 9797-1 padding method 1: '00' bytes to a multiple of 8 bytes, none for data of a multiple of 8 bytes.
+     */
+    static byte[] zeroPad(byte[] data) {
+        return Arrays.copyOf(data, (data.length + 7) / 8 * 8);
+    }
+
+    /**
+     * Visa Application Cryptogram of Cryptogram Version Number 10 ('0A'), 17 ('11') or 18 ('12') as the issuer verifies it.
+     * Terminal data is Amount, Authorised (6) || Amount, Other (6) || Terminal Country Code (2) || TVR (5) || Transaction Currency Code (2) ||
+     * Transaction Date (3) || Transaction Type (1) || Unpredictable Number (4), the CDOL1 related data of the test profile.
+     */
+    static byte[] visaApplicationCryptogram(int cryptogramVersion, byte[] masterKey, byte[] terminalData, byte[] aip, byte[] atc,
+        byte[] issuerApplicationData) throws GeneralSecurityException {
+        switch (cryptogramVersion) {
+            case 0x0A:
+                // MK_AC, zero padded data with the CVR of Issuer Application Data bytes 4-7
+                return macAlgorithm3(masterKey, zeroPad(concat(terminalData, aip, atc, Arrays.copyOfRange(issuerApplicationData, 3, 7))));
+            case 0x11:
+                // MK_AC, zero padded Amount, Authorised || Unpredictable Number || ATC || Issuer Application Data byte 5
+                return macAlgorithm3(masterKey, zeroPad(concat(Arrays.copyOf(terminalData, 6), Arrays.copyOfRange(terminalData, 25, 29), atc,
+                    Arrays.copyOfRange(issuerApplicationData, 4, 5))));
+            case 0x12:
+                // SK_AC of EMV Common Session Key Derivation, padding method 2, whole Issuer Application Data
+                return retailMac(deriveSessionKey(masterKey, atc), concat(terminalData, aip, atc, issuerApplicationData));
+            default:
+                throw new IllegalArgumentException("Cryptogram Version Number " + cryptogramVersion);
+        }
+    }
+
+    /**
+     * M/Chip Application Cryptogram of Cryptogram Version Number '10' or '14' as the issuer verifies it, terminal data as in
+     * visaApplicationCryptogram. CVN '10' session key is derived with ATC || '00 00' || Unpredictable Number, CVN '14' with ATC.
+     */
+    static byte[] mastercardApplicationCryptogram(int cryptogramVersion, byte[] masterKey, byte[] terminalData, byte[] aip, byte[] atc,
+        byte[] issuerApplicationData) throws GeneralSecurityException {
+        byte[] diversification;
+        switch (cryptogramVersion) {
+            case 0x10:
+                diversification = concat(atc, hex("00 00"), Arrays.copyOfRange(terminalData, 25, 29));
+                break;
+            case 0x14:
+                diversification = atc;
+                break;
+            default:
+                throw new IllegalArgumentException("Cryptogram Version Number " + cryptogramVersion);
+        }
+        // CVR of Issuer Application Data bytes 3-8
+        return retailMac(deriveSessionKey(masterKey, diversification), concat(terminalData, aip, atc, Arrays.copyOfRange(issuerApplicationData, 2, 8)));
+    }
+
+    /**
      * ISO/IEC 9797-1 MAC Algorithm 3 over already padded data, EMV Book 2 A1.2.1 step 3.
      */
     static byte[] macAlgorithm3(byte[] sessionKey, byte[] padded) throws GeneralSecurityException {
