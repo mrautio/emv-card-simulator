@@ -33,6 +33,12 @@ jobs:
         with:
           image: emvcard-builder
           args: --file=Dockerfile
+      - name: Merge SARIF runs
+        # GitHub code scanning rejects SARIF files with more than 20 runs, and
+        # Snyk emits one run per project found in the image.
+        run: |
+          jq -f .github/scripts/merge-sarif-runs.jq snyk.sarif > snyk.merged.sarif
+          mv snyk.merged.sarif snyk.sarif
       - name: Upload result to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # pin@v4.38.2
         with:
