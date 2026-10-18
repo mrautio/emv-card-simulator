@@ -31,6 +31,27 @@ if (!project.hasProperty("paymentapp_applet_aid")) {
     ext.paymentapp_applet_aid = "AFFFFFFFFF1234"
 }
 
+// gp.jar releases of GlobalPlatformPro that the deployment is known to work with
+ext.gp_checksums = [
+    "20.07.04": "4030c6eb46fb932c167f9a53fdbfab6b1364dbaafad5068b5bfc9779140cc1659e655d5ff53ee20d2823163011ede3ec9c3916632c2173cb6a1e17b84389490a",
+    "26.06.04": "70694381e9bb31d2a1c124dc2eda51be3c3276fe4124358294e9e1d132fe82c93a09295144626f24a1dd0e2443e9c4d354239211895d2f47af7ebca6b5861d25"
+]
+
+ext.gp_latest_version = "26.06.04"
+// The last release that runs on Java 8
+ext.gp_java8_version = "20.07.04"
+// These JavaCard SDKs are used with Java 8, which newer gp.jar releases do not run on
+ext.jc_versions_on_java8 = ["2.2.1", "2.2.2", "3.0.1", "3.0.4"]
+
+if (!project.hasProperty("gp_version")) {
+    ext.gp_version = jc_versions_on_java8.contains(jc_version) ? gp_java8_version : gp_latest_version
+}
+if (!gp_checksums.containsKey(gp_version) && !project.hasProperty("gp_checksum")) {
+    throw new GradleException("gp.jar version not recognized: ${gp_version}."
+        + " Give the expected SHA-512 of the release with -Pgp_checksum=<checksum>")
+}
+ext.gp_jar = "gp-${gp_version}.jar"
+
 // 3.1.0 targeting does not work
 /*if (jc_version == "3.1.0") {
     // class major version 51
@@ -93,6 +114,31 @@ checkstyleMain {
 
 checkstyleTest {
     source ='src/test/java'
+    maxWarnings = 0
+}
+
+// Host side deployment tool, it runs on the computer and not on the card
+sourceSets {
+    deploy {
+        java {
+            srcDirs = ['src/deploy/java']
+        }
+    }
+}
+
+compileDeployJava {
+    options.compilerArgs = [
+            '-Xlint:all',
+            '-Xlint:-options',
+            '-Werror'
+    ]
+    // javax.smartcardio is used instead of the gp.jar card readers, see CardDeployer
+    sourceCompatibility = 1.8
+    targetCompatibility = 1.8
+}
+
+checkstyleDeploy {
+    source ='src/deploy/java'
     maxWarnings = 0
 }
 
@@ -194,21 +240,25 @@ compileTestJava {
 }
 
 task downloadGp {
+    group "JavaCard"
+    description "Download the GlobalPlatformPro gp.jar, -Pgp_version selects the release"
+
     doLast {
-        String gpJar = 'gp.jar'
-        if (!new File(gpJar).exists()) {
+        if (!new File(gp_jar).exists()) {
             String checksumExtension = '.sha512.tmp'
-            String gpJarTemp = gpJar + checksumExtension
+            String gpJarTemp = gp_jar + checksumExtension
 
-            ant.get(src: 'https://github.com/martinpaljak/GlobalPlatformPro/releases/download/v20.07.04/gp.jar', dest:gpJar)
+            ant.get(src: "https://github.com/martinpaljak/GlobalPlatformPro/releases/download/v${gp_version}/gp.jar", dest:gp_jar)
 
-            ant.checksum(file: gpJar, algorithm:'SHA-512', fileext: checksumExtension)
-            String expectedChecksum = "4030c6eb46fb932c167f9a53fdbfab6b1364dbaafad5068b5bfc9779140cc1659e655d5ff53ee20d2823163011ede3ec9c3916632c2173cb6a1e17b84389490a"
+            ant.checksum(file: gp_jar, algorithm:'SHA-512', fileext: checksumExtension)
+            String expectedChecksum = project.findProperty('gp_checksum') ?: gp_checksums[gp_version]
             String actualChecksum = new File(gpJarTemp).text.trim()
             delete gpJarTemp
 
             if (!expectedChecksum.equals(actualChecksum)) {
-                throw new GradleException("Checksum not valid! file: " + gpJar + ", expected: " + expectedChecksum + ", actual: " + actualChecksum)        
+                // Keeping the file would make the next run skip the download and use it unverified
+                delete gp_jar
+                throw new GradleException("Checksum not valid! file: " + gp_jar + ", expected: " + expectedChecksum + ", actual: " + actualChecksum)
             }
         }
     }
@@ -265,29 +315,79 @@ task cap {
     }
 }
 
-// force delete might sometimes be needed?
-// java -jar gp.jar --delete A000000003 --force
+// Shared setup of the tasks that talk to a card. The gp command line tool is not used, because it
+// cannot connect to every card on every platform, see src/deploy/java CardDeployer.
+// Finds a JDK that runs the selected gp.jar release: Java 8 for 20.07.04 and Java 17 or newer for
+// the others, -Pdeploy_java_version overrides the choice. Called when a deploy task is run and not
+// while the build is configured, so that an unrelated build never looks for a JDK it does not need.
+def deployJavaLauncher() {
+    List<String> versions = project.hasProperty("deploy_java_version")
+            ? [deploy_java_version.toString()]
+            : (gp_version == gp_java8_version ? ["8"] : ["17", "21", "25"])
 
-task deployPse(type: Exec) {
-    dependsOn downloadGp, cap
-    group "JavaCard"
+    for (String version : versions) {
+        try {
+            return javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(Integer.parseInt(version))
+            }.get()
+        } catch (Exception ignored) {
+            // No such JDK installed, try the next one
+        }
+    }
+
+    throw new GradleException("No JDK ${versions.join(' or ')} found to run gp.jar ${gp_version}."
+        + " Install one, or deploy with the release that runs on Java 8: -Pgp_version=${gp_java8_version}")
+}
+
+def configureDeploy(JavaExec task, String capFile) {
+    task.dependsOn downloadGp
+    task.group "JavaCard"
+    task.classpath = sourceSets.deploy.output + files(gp_jar)
+    task.mainClass = 'emvcardsimulator.deploy.CardDeployer'
+    task.javaLauncher = providers.provider { deployJavaLauncher() }
+    task.systemProperties = [
+        // -Pdeploy_protocol=T=0 or T=1 pins the card protocol, by default they are probed
+        'deploy.protocol': project.findProperty('deploy_protocol') ?: 'auto',
+        // -Pdeploy_reader=<name part> selects the reader if several have a card
+        'deploy.reader': project.findProperty('deploy_reader') ?: '',
+        // -Pdeploy_lfdbh=SHA1 or SHA256 pins the load file data block hash, by default SHA-256 is
+        // attempted first and SHA-1 is the fallback for cards that reject it
+        'deploy.lfdbh': project.findProperty('deploy_lfdbh') ?: 'auto',
+        // -Pdeploy_force=false keeps an already installed package instead of replacing it
+        'deploy.force': project.findProperty('deploy_force') ?: 'true',
+        // -Pdeploy_delete=<AID>,<AID> removes other packages first, e.g. an earlier applet AID
+        'deploy.delete': project.findProperty('deploy_delete') ?: ''
+    ]
+
+    if (capFile != null) {
+        task.dependsOn cap
+        task.args capFile
+    }
+}
+
+task deployCheck(type: JavaExec) {
+    description "Check that the selected gp.jar works with the deployment, no card needed"
+    configureDeploy(delegate, null)
+    dependsOn cap
+    args 'check', 'build/pse.cap', 'build/ppse.cap', 'build/paymentapp.cap'
+}
+
+task cardInfo(type: JavaExec) {
+    description "Show the card contents without changing them"
+    configureDeploy(delegate, null)
+}
+
+task deployPse(type: JavaExec) {
     description "Deploy PaymentSystemEnvironment applet to JavaCard"
-
-    commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/pse.cap'
+    configureDeploy(delegate, 'build/pse.cap')
 }
 
-task deployPpse(type: Exec) {
-    dependsOn downloadGp, cap
-    group "JavaCard"
+task deployPpse(type: JavaExec) {
     description "Deploy ProximityPaymentSystemEnvironment applet to JavaCard"
-
-    commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/ppse.cap'
+    configureDeploy(delegate, 'build/ppse.cap')
 }
 
-task deployPaymentApp(type: Exec) {
-    dependsOn downloadGp, cap
-    group "JavaCard"
+task deployPaymentApp(type: JavaExec) {
     description "Deploy payment application applet to JavaCard"
-
-    commandLine 'java', '-jar', 'gp.jar', '--force', '--install', 'build/paymentapp.cap'
+    configureDeploy(delegate, 'build/paymentapp.cap')
 }
