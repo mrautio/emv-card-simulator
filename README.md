@@ -116,4 +116,33 @@ gradle deployPse -Pjc_version=2.2.2
 gradle deployPpse -Pjc_version=2.2.2
 # Deploy the payment app to a JavaCard 2 SmartCard 
 gradle deployPaymentApp -Pjc_version=2.2.2
+# Show what is installed on the card without changing it
+gradle cardInfo
+# Check that the selected gp.jar works on the JDK that runs it, no card needed
+gradle deployCheck
 ```
+
+The deployment uses the [GlobalPlatformPro](https://github.com/martinpaljak/GlobalPlatformPro)
+library through `src/deploy/java`, which makes the PC/SC connection itself instead of running the
+`gp` command line tool. The tool connects with protocol `T=*`.
+
+The newest known `gp.jar` release is used by default and runs on JDK >= 17. When `jc_version` targets a JavaCard
+SDK that is used with Java 8 (2.2.1, 2.2.2, 3.0.1 or 3.0.4), the deployment falls back to gp.jar
+20.07.04 which may be incompatible with Apple Silicon.
+
+```sh
+# JavaCard 3.0.5, deployed with the newest gp.jar on a JDK 17 or newer
+gradle deployPaymentApp
+# JavaCard 2.2.2, deployed with gp.jar 20.07.04 on Java 8
+gradle deployPaymentApp -Pjc_version=2.2.2
+# pick the release and the JDK that runs it yourself
+gradle deployPaymentApp -Pgp_version=20.07.04 -Pdeploy_java_version=8
+# any other release, with the SHA-512 of its gp.jar
+gradle deployPaymentApp -Pgp_version=26.04.20 -Pgp_checksum=<sha512>
+```
+
+`gradle deployCheck` reports which release and JDK are used and whether they work together.
+
+### MacOS
+
+Deploying from MacOS works with the tasks above, but not with the `gp` command line tool, because the CCID driver may accept a T=1 connection to a card whose ATR announces T=0 only.
