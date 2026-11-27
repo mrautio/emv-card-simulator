@@ -91,8 +91,8 @@ if (System.properties['os.name'].toLowerCase().contains('windows')) {
 }
 
 task buildSimulatorLibrary(type: Exec) {
-    group "Build"
-    description "Build Rust simulator library"
+    group = "Build"
+    description = "Build Rust simulator library"
     workingDir 'src/test/rust/simulator'
 
     commandLine "${cmd_shell}", "${cmd_shell_option}", 'cargo build'
@@ -104,7 +104,7 @@ tasks.withType(Test) {
 
 checkstyle {
     // 9.3 is the last Checkstyle release that runs on Java 8
-    toolVersion '9.3';
+    toolVersion = '9.3'
 }
 
 checkstyleMain {
@@ -181,8 +181,8 @@ test {
     testLogging {
         outputs.upToDateWhen { false }
         events "started", "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showStandardStreams true
+        exceptionFormat = "full"
+        showStandardStreams = true
     }
 
     failFast = false
@@ -190,8 +190,8 @@ test {
 
 task testPrivateCards(type: Test) {
     dependsOn buildSimulatorLibrary
-    group "Verification"
-    description "Run transactions of the private test cards in private/cards against emvpt, -PprivateCards=<path part> selects cards"
+    group = "Verification"
+    description = "Run transactions of the private test cards in private/cards against emvpt, -PprivateCards=<path part> selects cards"
     workingDir 'src/test/java/emvcardsimulator'
     systemProperty 'privateCards', project.findProperty('privateCards') ?: ''
     testClassesDirs = sourceSets.test.output.classesDirs
@@ -205,8 +205,8 @@ task testPrivateCards(type: Test) {
     testLogging {
         outputs.upToDateWhen { false }
         events "passed", "skipped", "failed"
-        exceptionFormat "short"
-        showStandardStreams true
+        exceptionFormat = "short"
+        showStandardStreams = true
     }
 }
 
@@ -240,8 +240,8 @@ compileTestJava {
 }
 
 task downloadGp {
-    group "JavaCard"
-    description "Download the GlobalPlatformPro gp.jar, -Pgp_version selects the release"
+    group = "JavaCard"
+    description = "Download the GlobalPlatformPro gp.jar, -Pgp_version selects the release"
 
     doLast {
         if (!new File(gp_jar).exists()) {
@@ -266,8 +266,8 @@ task downloadGp {
 
 task cap {
     dependsOn assemble
-    group "Build"
-    description "Assembles a cap archive containing the main classes."
+    group = "Build"
+    description = "Assembles a cap archive containing the main classes."
 
     doLast {
         ant.taskdef(name: 'javacard', classname: 'pro.javacard.ant.JavaCard', classpath: configurations.javacardAntTask.asPath)
@@ -341,7 +341,7 @@ def deployJavaLauncher() {
 
 def configureDeploy(JavaExec task, String capFile) {
     task.dependsOn downloadGp
-    task.group "JavaCard"
+    task.group = "JavaCard"
     task.classpath = sourceSets.deploy.output + files(gp_jar)
     task.mainClass = 'emvcardsimulator.deploy.CardDeployer'
     task.javaLauncher = providers.provider { deployJavaLauncher() }
@@ -366,28 +366,28 @@ def configureDeploy(JavaExec task, String capFile) {
 }
 
 task deployCheck(type: JavaExec) {
-    description "Check that the selected gp.jar works with the deployment, no card needed"
+    description = "Check that the selected gp.jar works with the deployment, no card needed"
     configureDeploy(delegate, null)
     dependsOn cap
     args 'check', 'build/pse.cap', 'build/ppse.cap', 'build/paymentapp.cap'
 }
 
 task cardInfo(type: JavaExec) {
-    description "Show the card contents without changing them"
+    description = "Show the card contents without changing them"
     configureDeploy(delegate, null)
 }
 
 task deployPse(type: JavaExec) {
-    description "Deploy PaymentSystemEnvironment applet to JavaCard"
+    description = "Deploy PaymentSystemEnvironment applet to JavaCard"
     configureDeploy(delegate, 'build/pse.cap')
 }
 
 task deployPpse(type: JavaExec) {
-    description "Deploy ProximityPaymentSystemEnvironment applet to JavaCard"
+    description = "Deploy ProximityPaymentSystemEnvironment applet to JavaCard"
     configureDeploy(delegate, 'build/ppse.cap')
 }
 
 task deployPaymentApp(type: JavaExec) {
-    description "Deploy payment application applet to JavaCard"
+    description = "Deploy payment application applet to JavaCard"
     configureDeploy(delegate, 'build/paymentapp.cap')
 }
